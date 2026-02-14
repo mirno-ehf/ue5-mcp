@@ -7,23 +7,16 @@ Let AI coding assistants inspect and modify Unreal Engine 5 Blueprint assets via
 - **Editor mode:** zero-overhead subsystem when the editor is open
 - **Commandlet mode:** headless standalone process when the editor is closed
 
-## Quick Start
+## Getting Started
 
-1. Clone into your project's `Plugins/BlueprintMCP/` directory
-2. Build the TypeScript server: `cd Plugins/BlueprintMCP/Tools && npm install && npm run build`
-3. Add to `.mcp.json` at your project root:
-   ```json
-   {
-     "mcpServers": {
-       "blueprint-mcp": {
-         "command": "node",
-         "args": ["Plugins/BlueprintMCP/Tools/dist/index.js"],
-         "env": { "UE_PROJECT_DIR": "." }
-       }
-     }
-   }
-   ```
-4. Open your project in the UE5 editor — the C++ plugin compiles and starts automatically
+```bash
+cd YourProject/Plugins
+git clone https://github.com/mirno-ehf/ue5-mcp.git BlueprintMCP
+```
+
+Then tell Claude Code: **"Set up BlueprintMCP"** — it reads the plugin's `CLAUDE.md` and handles the rest (building, configuring `.mcp.json`, verification).
+
+Requires Node.js 18+ and UE5 5.4+.
 
 ## Available Tools
 
