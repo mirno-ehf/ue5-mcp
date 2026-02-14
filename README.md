@@ -26,7 +26,7 @@ Clone this repository into your project's `Plugins/` directory:
 
 ```bash
 cd YourProject/Plugins
-git clone https://github.com/yourusername/BlueprintMCP.git
+git clone https://github.com/Medagogic/ue5-mcp.git BlueprintMCP
 ```
 
 Your project structure should look like:
