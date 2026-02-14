@@ -1285,7 +1285,7 @@ server.tool(
 
 server.tool(
   "delete_node",
-  "Remove a node from a Blueprint graph. Disconnects all pins and removes the node. Use get_blueprint_graph to find node IDs first.",
+  "Remove a node from a Blueprint graph. Disconnects all pins and removes the node. Use get_blueprint_graph to find node IDs first. Entry/root nodes (FunctionEntry, Event, CustomEvent) cannot be deleted as this would leave the graph uncompilable.",
   {
     blueprint: z.string().describe("Blueprint name or package path"),
     nodeId: z.string().describe("GUID of the node to delete (from get_blueprint_graph node 'id' field)"),

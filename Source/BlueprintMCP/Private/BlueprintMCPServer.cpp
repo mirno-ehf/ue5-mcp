@@ -2952,6 +2952,32 @@ FString FBlueprintMCPServer::HandleDeleteNode(const FString& Body)
 	FString NodeTitle = Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString();
 	FString GraphName = Graph->GetName();
 
+	// Protect root/entry nodes — deleting these leaves the graph in an invalid
+	// state with no root node, causing compiler errors that can't be fixed
+	// without recreating the entire function/event.
+	if (Cast<UK2Node_FunctionEntry>(Node))
+	{
+		return MakeErrorJson(FString::Printf(
+			TEXT("Cannot delete FunctionEntry node '%s' in graph '%s'. ")
+			TEXT("This is the root node of the function — removing it would leave an empty, uncompilable graph. ")
+			TEXT("To remove the entire function, delete it from the Blueprint editor."),
+			*NodeTitle, *GraphName));
+	}
+	if (Cast<UK2Node_Event>(Node))
+	{
+		return MakeErrorJson(FString::Printf(
+			TEXT("Cannot delete event entry node '%s' in graph '%s'. ")
+			TEXT("This is the root node of the event handler — removing it would leave an empty, uncompilable graph."),
+			*NodeTitle, *GraphName));
+	}
+	if (Cast<UK2Node_CustomEvent>(Node))
+	{
+		return MakeErrorJson(FString::Printf(
+			TEXT("Cannot delete CustomEvent entry node '%s' in graph '%s'. ")
+			TEXT("This is the root node of the custom event — removing it would leave an empty, uncompilable graph."),
+			*NodeTitle, *GraphName));
+	}
+
 	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Deleting node '%s' (%s) from graph '%s' in '%s'"),
 		*NodeId, *NodeTitle, *GraphName, *BlueprintName);
 
