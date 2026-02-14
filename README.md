@@ -4,6 +4,8 @@ Vibe code your Blueprints. This plugin lets Claude Code (or any MCP client) read
 
 > "Add a health component to my player character" · "Find everywhere I use GetActorLocation and replace it" · "What does my damage system do?"
 
+https://github.com/user-attachments/assets/c52a4cae-d882-4d60-acf9-2204ddd2ab89
+
 ## Getting Started
 
 Tell Claude Code:
