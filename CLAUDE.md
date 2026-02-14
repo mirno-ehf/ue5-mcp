@@ -20,28 +20,17 @@ Follow these steps sequentially when installing BlueprintMCP into a UE5 project 
 | Node.js 18+ | `node --version` | Required for the TypeScript MCP server |
 | npm | `npm --version` | Comes with Node.js |
 
-### Step 1: Verify plugin location
+### Step 1: Clone into the project
 
-The plugin must be inside the project's `Plugins/` directory:
+The plugin must be inside the project's `Plugins/` directory. If it's not already there, clone it:
 
-```
-<ProjectRoot>/
-  <ProjectName>.uproject
-  Plugins/
-    BlueprintMCP/          <-- this repo
-      BlueprintMCP.uplugin
-      Source/
-      Tools/
+```bash
+git clone https://github.com/mirno-ehf/ue5-mcp.git Plugins/BlueprintMCP
 ```
 
-Verify from the project root:
+Verify:
 ```bash
 ls Plugins/BlueprintMCP/BlueprintMCP.uplugin
-```
-
-Find the project root by locating the `.uproject` file:
-```bash
-ls *.uproject
 ```
 
 ### Step 2: Build the TypeScript MCP server

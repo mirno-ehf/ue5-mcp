@@ -6,12 +6,9 @@ Vibe code your Blueprints. This plugin lets Claude Code (or any MCP client) read
 
 ## Getting Started
 
-```bash
-cd YourProject/Plugins
-git clone https://github.com/mirno-ehf/ue5-mcp.git BlueprintMCP
-```
+Tell Claude Code:
 
-Then tell Claude Code: **"Set up BlueprintMCP"** — it reads the plugin's `CLAUDE.md` and handles the rest.
+> Set up https://github.com/mirno-ehf/ue5-mcp in my project
 
 Requires Node.js 18+ and UE5 5.4+.
 
