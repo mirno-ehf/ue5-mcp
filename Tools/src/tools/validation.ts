@@ -63,31 +63,89 @@ export function registerValidationTools(server: McpServer): void {
 
   server.tool(
     "validate_all_blueprints",
-    "Bulk-validate all Blueprints (or a filtered subset) by compiling each one and reporting errors. Use after reparenting, C++ changes, or any operation that could cause cascading breakage. Returns only failed Blueprints to keep output manageable. Can take several minutes for large projects.",
+    "Bulk-validate all Blueprints (or a filtered subset) by compiling each one and reporting errors. Use after reparenting, C++ changes, or any operation that could cause cascading breakage. Returns only failed Blueprints to keep output manageable. Sends progress notifications during validation.",
     {
       filter: z.string().optional().describe("Optional path or name filter (e.g. '/Game/Blueprints/WebUI/' or 'HUD'). If omitted, validates ALL blueprints."),
+      batchSize: z.number().optional().describe("Number of blueprints to validate per batch (default 50). Smaller batches give more frequent progress updates."),
     },
-    async ({ filter }) => {
+    async ({ filter, batchSize: batchSizeParam }, extra) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
-      const body: Record<string, string> = {};
-      if (filter) body.filter = filter;
+      const batchSize = batchSizeParam ?? 50;
 
-      const data = await uePost("/api/validate-all-blueprints", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+      // Step 1: Get total count (fast, no compilation)
+      const countBody: Record<string, unknown> = { countOnly: true };
+      if (filter) countBody.filter = filter;
 
+      const countData = await uePost("/api/validate-all-blueprints", countBody);
+      if (countData.error) return { content: [{ type: "text" as const, text: `Error: ${countData.error}` }] };
+
+      const totalMatching: number = countData.totalMatching ?? 0;
+
+      if (totalMatching === 0) {
+        const lines = ["# Bulk Validation Results"];
+        if (filter) lines.push(`Filter: ${filter}`);
+        lines.push(`No matching blueprints found.`);
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      }
+
+      // Extract progress token from MCP request metadata
+      const progressToken = extra._meta?.progressToken;
+
+      // Step 2: Iterate in batches
+      let totalChecked = 0;
+      let totalPassed = 0;
+      let totalFailed = 0;
+      let totalCrashed = 0;
+      const allFailed: any[] = [];
+
+      for (let offset = 0; offset < totalMatching; offset += batchSize) {
+        const body: Record<string, unknown> = { offset, limit: batchSize };
+        if (filter) body.filter = filter;
+
+        const data = await uePost("/api/validate-all-blueprints", body);
+        if (data.error) return { content: [{ type: "text" as const, text: `Error at offset ${offset}: ${data.error}` }] };
+
+        totalChecked += data.totalChecked ?? 0;
+        totalPassed += data.totalPassed ?? 0;
+        totalFailed += data.totalFailed ?? 0;
+        totalCrashed += (data.totalCrashed ?? 0);
+
+        if (data.failed?.length) {
+          allFailed.push(...data.failed);
+        }
+
+        // Send MCP progress notification if client requested it
+        if (progressToken !== undefined) {
+          try {
+            await extra.sendNotification({
+              method: "notifications/progress",
+              params: {
+                progressToken,
+                progress: Math.min(offset + batchSize, totalMatching),
+                total: totalMatching,
+                message: `Validated ${totalChecked}/${totalMatching} blueprints (${totalFailed} failed)`,
+              },
+            });
+          } catch {
+            // Progress notifications are best-effort per MCP spec
+          }
+        }
+      }
+
+      // Step 3: Format aggregated results
       const lines: string[] = [];
       lines.push(`# Bulk Validation Results`);
-      if (data.filter) lines.push(`Filter: ${data.filter}`);
-      lines.push(`Checked: ${data.totalChecked}`);
-      lines.push(`Passed: ${data.totalPassed}`);
-      lines.push(`Failed: ${data.totalFailed}`);
-      if (data.totalCrashed) lines.push(`Crashed: ${data.totalCrashed}`);
+      if (filter) lines.push(`Filter: ${filter}`);
+      lines.push(`Checked: ${totalChecked}`);
+      lines.push(`Passed: ${totalPassed}`);
+      lines.push(`Failed: ${totalFailed}`);
+      if (totalCrashed) lines.push(`Crashed: ${totalCrashed}`);
 
-      if (data.failed?.length) {
+      if (allFailed.length) {
         lines.push(`\n## Failed Blueprints\n`);
-        for (const bp of data.failed) {
+        for (const bp of allFailed) {
           lines.push(`### ${bp.blueprint} (${bp.path || ""})`);
           lines.push(`Status: ${bp.status} | Errors: ${bp.errorCount} | Warnings: ${bp.warningCount}`);
 

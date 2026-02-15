@@ -213,13 +213,55 @@ FString FBlueprintMCPServer::HandleValidateAllBlueprints(const FString& Body)
 	// Body is optional — empty body means validate all
 
 	FString Filter;
+	bool bCountOnly = false;
+	int32 Offset = 0;
+	int32 Limit = 0;
+
 	if (Json.IsValid())
 	{
 		Filter = Json->GetStringField(TEXT("filter"));
+		bCountOnly = Json->GetBoolField(TEXT("countOnly"));
+		Offset = (int32)Json->GetNumberField(TEXT("offset"));
+		Limit = (int32)Json->GetNumberField(TEXT("limit"));
 	}
 
-	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Bulk validating blueprints (filter: '%s')"),
-		Filter.IsEmpty() ? TEXT("*") : *Filter);
+	// First pass: collect matching asset indices (string comparisons only, no GetAsset())
+	TArray<int32> MatchingIndices;
+	for (int32 i = 0; i < AllBlueprintAssets.Num(); i++)
+	{
+		const FAssetData& Asset = AllBlueprintAssets[i];
+		if (!Filter.IsEmpty())
+		{
+			FString AssetName = Asset.AssetName.ToString();
+			FString PackagePath = Asset.PackageName.ToString();
+			if (!PackagePath.Contains(Filter) && !AssetName.Contains(Filter))
+			{
+				continue;
+			}
+		}
+		MatchingIndices.Add(i);
+	}
+
+	int32 TotalMatching = MatchingIndices.Num();
+
+	// countOnly: return count without compiling anything
+	if (bCountOnly)
+	{
+		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetNumberField(TEXT("totalMatching"), TotalMatching);
+		if (!Filter.IsEmpty())
+		{
+			Result->SetStringField(TEXT("filter"), Filter);
+		}
+		return JsonToString(Result);
+	}
+
+	// Compute range
+	int32 StartIdx = FMath::Clamp(Offset, 0, TotalMatching);
+	int32 EndIdx = (Limit > 0) ? FMath::Min(StartIdx + Limit, TotalMatching) : TotalMatching;
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Bulk validating blueprints (filter: '%s', range: %d-%d of %d matching)"),
+		Filter.IsEmpty() ? TEXT("*") : *Filter, StartIdx, EndIdx, TotalMatching);
 
 	TArray<TSharedPtr<FJsonValue>> FailedArr;
 	int32 TotalChecked = 0;
@@ -227,19 +269,11 @@ FString FBlueprintMCPServer::HandleValidateAllBlueprints(const FString& Body)
 	int32 TotalFailed = 0;
 	int32 TotalCrashed = 0;
 
-	for (const FAssetData& Asset : AllBlueprintAssets)
+	for (int32 Idx = StartIdx; Idx < EndIdx; Idx++)
 	{
+		const FAssetData& Asset = AllBlueprintAssets[MatchingIndices[Idx]];
 		FString AssetName = Asset.AssetName.ToString();
 		FString PackagePath = Asset.PackageName.ToString();
-
-		// Apply filter if specified
-		if (!Filter.IsEmpty())
-		{
-			if (!PackagePath.Contains(Filter) && !AssetName.Contains(Filter))
-			{
-				continue;
-			}
-		}
 
 		// Load the Blueprint
 		UBlueprint* BP = Cast<UBlueprint>(Asset.GetAsset());
@@ -285,6 +319,7 @@ FString FBlueprintMCPServer::HandleValidateAllBlueprints(const FString& Body)
 		TotalChecked, TotalPassed, TotalFailed, TotalCrashed);
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetNumberField(TEXT("totalMatching"), TotalMatching);
 	Result->SetNumberField(TEXT("totalChecked"), TotalChecked);
 	Result->SetNumberField(TEXT("totalPassed"), TotalPassed);
 	Result->SetNumberField(TEXT("totalFailed"), TotalFailed);
