@@ -428,6 +428,10 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("setPinDefault")));
 	Router->BindRoute(FHttpPath(TEXT("/api/move-node")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("moveNode")));
+	Router->BindRoute(FHttpPath(TEXT("/api/get-node-comment")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("getNodeComment")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-node-comment")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setNodeComment")));
 	Router->BindRoute(FHttpPath(TEXT("/api/change-struct-node-type")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("changeStructNodeType")));
 	Router->BindRoute(FHttpPath(TEXT("/api/remove-function-parameter")), EHttpServerRequestVerbs::VERB_POST,
@@ -611,6 +615,7 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("deleteNode"),
 		TEXT("duplicateNodes"),
 		TEXT("addNode"),
+		TEXT("setNodeComment"),
 		TEXT("renameAsset"),
 		TEXT("reparentBlueprint"),
 		TEXT("setBlueprintDefault"),
@@ -649,6 +654,8 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("refreshAllNodes"),         [this](const TMap<FString, FString>&, const FString& B) { return HandleRefreshAllNodes(B); });
 	HandlerMap.Add(TEXT("setPinDefault"),           [this](const TMap<FString, FString>&, const FString& B) { return HandleSetPinDefault(B); });
 	HandlerMap.Add(TEXT("moveNode"),               [this](const TMap<FString, FString>&, const FString& B) { return HandleMoveNode(B); });
+	HandlerMap.Add(TEXT("getNodeComment"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleGetNodeComment(B); });
+	HandlerMap.Add(TEXT("setNodeComment"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleSetNodeComment(B); });
 	HandlerMap.Add(TEXT("changeStructNodeType"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleChangeStructNodeType(B); });
 	HandlerMap.Add(TEXT("deleteNode"),              [this](const TMap<FString, FString>&, const FString& B) { return HandleDeleteNode(B); });
 	HandlerMap.Add(TEXT("duplicateNodes"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleDuplicateNodes(B); });

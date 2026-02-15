@@ -134,6 +134,8 @@ private:
 	FString HandleRefreshAllNodes(const FString& Body);
 	FString HandleSetPinDefault(const FString& Body);
 	FString HandleMoveNode(const FString& Body);
+	FString HandleGetNodeComment(const FString& Body);
+	FString HandleSetNodeComment(const FString& Body);
 
 	// ----- Struct node manipulation (write) -----
 	FString HandleChangeStructNodeType(const FString& Body);
