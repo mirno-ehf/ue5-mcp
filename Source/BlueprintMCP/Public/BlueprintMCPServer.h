@@ -158,6 +158,11 @@ private:
 	// ----- Function Parameters -----
 	FString HandleAddFunctionParameter(const FString& Body);
 
+	// ----- Components -----
+	FString HandleAddComponent(const FString& Body);
+	FString HandleRemoveComponent(const FString& Body);
+	FString HandleListComponents(const FString& Body);
+
 	// ----- Property defaults -----
 	FString HandleSetBlueprintDefault(const FString& Body);
 

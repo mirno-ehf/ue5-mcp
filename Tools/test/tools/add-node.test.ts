@@ -75,4 +75,128 @@ describe("add_node", () => {
     expect(data.error).toBeDefined();
     expect(data.availableGraphs).toBeDefined();
   });
+
+  // --- New node types ---
+
+  it("adds a Branch node", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "Branch",
+    });
+    expect(data.error).toBeUndefined();
+    expect(data.success).toBe(true);
+    expect(data.nodeId).toBeDefined();
+    expect(data.saved).toBe(true);
+    // Branch should have Condition input pin and True/False output pins
+    const pins = data.node?.pins || data.pins || [];
+    const pinNames = pins.map((p: any) => p.name);
+    expect(pinNames).toContain("Condition");
+  });
+
+  it("adds a Sequence node", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "Sequence",
+    });
+    expect(data.error).toBeUndefined();
+    expect(data.success).toBe(true);
+    expect(data.nodeId).toBeDefined();
+    expect(data.saved).toBe(true);
+  });
+
+  it("adds a CustomEvent node", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "CustomEvent",
+      eventName: "TestCustomEvent",
+    });
+    expect(data.error).toBeUndefined();
+    expect(data.success).toBe(true);
+    expect(data.nodeId).toBeDefined();
+    expect(data.saved).toBe(true);
+  });
+
+  it("rejects CustomEvent without eventName", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "CustomEvent",
+    });
+    expect(data.error).toBeDefined();
+  });
+
+  it("adds a ForEachLoop node", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "ForEachLoop",
+    });
+    expect(data.error).toBeUndefined();
+    expect(data.success).toBe(true);
+    expect(data.nodeId).toBeDefined();
+    expect(data.saved).toBe(true);
+  });
+
+  it("adds a ForLoop node", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "ForLoop",
+    });
+    expect(data.error).toBeUndefined();
+    expect(data.success).toBe(true);
+    expect(data.nodeId).toBeDefined();
+    expect(data.saved).toBe(true);
+  });
+
+  it("adds a ForLoopWithBreak node", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "ForLoopWithBreak",
+    });
+    expect(data.error).toBeUndefined();
+    expect(data.success).toBe(true);
+    expect(data.nodeId).toBeDefined();
+    expect(data.saved).toBe(true);
+  });
+
+  it("adds a WhileLoop node", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "WhileLoop",
+    });
+    expect(data.error).toBeUndefined();
+    expect(data.success).toBe(true);
+    expect(data.nodeId).toBeDefined();
+    expect(data.saved).toBe(true);
+  });
+
+  it("adds a SpawnActorFromClass node without actorClass", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "SpawnActorFromClass",
+    });
+    expect(data.error).toBeUndefined();
+    expect(data.success).toBe(true);
+    expect(data.nodeId).toBeDefined();
+    expect(data.saved).toBe(true);
+  });
+
+  it("adds a Select node", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "Select",
+    });
+    expect(data.error).toBeUndefined();
+    expect(data.success).toBe(true);
+    expect(data.nodeId).toBeDefined();
+    expect(data.saved).toBe(true);
+  });
 });

@@ -18,6 +18,12 @@
 #include "K2Node_MakeStruct.h"
 #include "K2Node_DynamicCast.h"
 #include "K2Node_CallParentFunction.h"
+#include "K2Node_IfThenElse.h"
+#include "K2Node_ExecutionSequence.h"
+#include "K2Node_MacroInstance.h"
+#include "K2Node_SpawnActorFromClass.h"
+#include "K2Node_Select.h"
+#include "GameFramework/Actor.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Serialization/JsonReader.h"
@@ -1601,10 +1607,127 @@ FString FBlueprintMCPServer::HandleAddNode(const FString& Body)
 		ParentCallNode->AllocateDefaultPins();
 		NewNode = ParentCallNode;
 	}
+	else if (NodeType == TEXT("Branch"))
+	{
+		UK2Node_IfThenElse* BranchNode = NewObject<UK2Node_IfThenElse>(TargetGraph);
+		BranchNode->NodePosX = PosX;
+		BranchNode->NodePosY = PosY;
+		TargetGraph->AddNode(BranchNode, false, false);
+		BranchNode->AllocateDefaultPins();
+		NewNode = BranchNode;
+	}
+	else if (NodeType == TEXT("Sequence"))
+	{
+		UK2Node_ExecutionSequence* SeqNode = NewObject<UK2Node_ExecutionSequence>(TargetGraph);
+		SeqNode->NodePosX = PosX;
+		SeqNode->NodePosY = PosY;
+		TargetGraph->AddNode(SeqNode, false, false);
+		SeqNode->AllocateDefaultPins();
+		NewNode = SeqNode;
+	}
+	else if (NodeType == TEXT("CustomEvent"))
+	{
+		FString EventName = Json->GetStringField(TEXT("eventName"));
+		if (EventName.IsEmpty())
+		{
+			return MakeErrorJson(TEXT("Missing required field 'eventName' for CustomEvent"));
+		}
+
+		UK2Node_CustomEvent* EventNode = NewObject<UK2Node_CustomEvent>(TargetGraph);
+		EventNode->CustomFunctionName = FName(*EventName);
+		EventNode->NodePosX = PosX;
+		EventNode->NodePosY = PosY;
+		TargetGraph->AddNode(EventNode, false, false);
+		EventNode->AllocateDefaultPins();
+		NewNode = EventNode;
+	}
+	else if (NodeType == TEXT("ForEachLoop") || NodeType == TEXT("ForLoop") || NodeType == TEXT("ForLoopWithBreak") || NodeType == TEXT("WhileLoop"))
+	{
+		// These are all macro instances from the engine standard macro library
+		FString MacroName;
+		if (NodeType == TEXT("ForEachLoop")) MacroName = TEXT("ForEachLoop");
+		else if (NodeType == TEXT("ForLoop")) MacroName = TEXT("ForLoop");
+		else if (NodeType == TEXT("ForLoopWithBreak")) MacroName = TEXT("ForLoopWithBreak");
+		else MacroName = TEXT("WhileLoop");
+
+		// Load the standard macros Blueprint from the engine
+		UBlueprint* StandardMacros = Cast<UBlueprint>(StaticLoadObject(
+			UBlueprint::StaticClass(), nullptr,
+			TEXT("/Engine/EditorBlueprintResources/StandardMacros.StandardMacros")));
+
+		UEdGraph* MacroGraph = nullptr;
+		if (StandardMacros)
+		{
+			for (UEdGraph* Graph : StandardMacros->MacroGraphs)
+			{
+				if (Graph && Graph->GetName() == MacroName)
+				{
+					MacroGraph = Graph;
+					break;
+				}
+			}
+		}
+
+		if (!MacroGraph)
+		{
+			return MakeErrorJson(FString::Printf(
+				TEXT("Standard macro '%s' not found. Ensure the engine standard macros are loaded."), *MacroName));
+		}
+
+		UK2Node_MacroInstance* MacroNode = NewObject<UK2Node_MacroInstance>(TargetGraph);
+		MacroNode->SetMacroGraph(MacroGraph);
+		MacroNode->NodePosX = PosX;
+		MacroNode->NodePosY = PosY;
+		TargetGraph->AddNode(MacroNode, false, false);
+		MacroNode->AllocateDefaultPins();
+		NewNode = MacroNode;
+	}
+	else if (NodeType == TEXT("SpawnActorFromClass"))
+	{
+		FString ClassName = Json->GetStringField(TEXT("actorClass"));
+		// actorClass is optional — if not provided, user can set it via the class pin later
+
+		UClass* ActorClass = nullptr;
+		if (!ClassName.IsEmpty())
+		{
+			for (TObjectIterator<UClass> It; It; ++It)
+			{
+				if ((It->GetName() == ClassName || It->GetName() == ClassName + TEXT("_C")) && It->IsChildOf(AActor::StaticClass()))
+				{
+					ActorClass = *It;
+					break;
+				}
+			}
+			if (!ActorClass)
+			{
+				return MakeErrorJson(FString::Printf(TEXT("Actor class '%s' not found"), *ClassName));
+			}
+		}
+
+		UK2Node_SpawnActorFromClass* SpawnNode = NewObject<UK2Node_SpawnActorFromClass>(TargetGraph);
+		if (ActorClass)
+		{
+			SpawnNode->SetNodeClass(ActorClass);
+		}
+		SpawnNode->NodePosX = PosX;
+		SpawnNode->NodePosY = PosY;
+		TargetGraph->AddNode(SpawnNode, false, false);
+		SpawnNode->AllocateDefaultPins();
+		NewNode = SpawnNode;
+	}
+	else if (NodeType == TEXT("Select"))
+	{
+		UK2Node_Select* SelectNode = NewObject<UK2Node_Select>(TargetGraph);
+		SelectNode->NodePosX = PosX;
+		SelectNode->NodePosY = PosY;
+		TargetGraph->AddNode(SelectNode, false, false);
+		SelectNode->AllocateDefaultPins();
+		NewNode = SelectNode;
+	}
 	else
 	{
 		return MakeErrorJson(FString::Printf(
-			TEXT("Unsupported nodeType '%s'. Supported: BreakStruct, MakeStruct, CallFunction, VariableGet, VariableSet, DynamicCast, OverrideEvent, CallParentFunction"),
+			TEXT("Unsupported nodeType '%s'. Supported: BreakStruct, MakeStruct, CallFunction, VariableGet, VariableSet, DynamicCast, OverrideEvent, CallParentFunction, Branch, Sequence, CustomEvent, ForEachLoop, ForLoop, ForLoopWithBreak, WhileLoop, SpawnActorFromClass, Select"),
 			*NodeType));
 	}
 
