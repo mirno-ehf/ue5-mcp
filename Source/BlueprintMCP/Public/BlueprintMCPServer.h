@@ -141,6 +141,11 @@ private:
 	FString HandleAddVariable(const FString& Body);
 	FString HandleRemoveVariable(const FString& Body);
 
+	// ----- Interfaces -----
+	FString HandleAddInterface(const FString& Body);
+	FString HandleRemoveInterface(const FString& Body);
+	FString HandleListInterfaces(const FString& Body);
+
 	// ----- Property defaults -----
 	FString HandleSetBlueprintDefault(const FString& Body);
 
