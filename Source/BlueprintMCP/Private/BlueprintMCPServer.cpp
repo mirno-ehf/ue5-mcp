@@ -445,6 +445,8 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("reparentBlueprint")));
 	Router->BindRoute(FHttpPath(TEXT("/api/set-blueprint-default")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("setBlueprintDefault")));
+	Router->BindRoute(FHttpPath(TEXT("/api/create-blueprint")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("createBlueprint")));
 
 	// Snapshot / Safety tools
 	Router->BindRoute(FHttpPath(TEXT("/api/snapshot-graph")), EHttpServerRequestVerbs::VERB_POST,
@@ -607,6 +609,10 @@ bool FBlueprintMCPServer::ProcessOneRequest()
 	else if (Req->Endpoint == TEXT("setBlueprintDefault"))
 	{
 		Response = HandleSetBlueprintDefault(Req->Body);
+	}
+	else if (Req->Endpoint == TEXT("createBlueprint"))
+	{
+		Response = HandleCreateBlueprint(Req->Body);
 	}
 	else if (Req->Endpoint == TEXT("snapshotGraph"))
 	{
@@ -5856,5 +5862,169 @@ FString FBlueprintMCPServer::HandleSetBlueprintDefault(const FString& Body)
 	Result->SetStringField(TEXT("newValue"), ActualNewValue);
 	Result->SetStringField(TEXT("propertyType"), Prop->GetCPPType());
 	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleCreateBlueprint — create a new Blueprint asset
+// ============================================================
+
+FString FBlueprintMCPServer::HandleCreateBlueprint(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprintName"));
+	FString PackagePath = Json->GetStringField(TEXT("packagePath"));
+	FString ParentClassName = Json->GetStringField(TEXT("parentClass"));
+	FString BlueprintTypeStr = Json->GetStringField(TEXT("blueprintType"));
+
+	if (BlueprintName.IsEmpty() || PackagePath.IsEmpty() || ParentClassName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprintName, packagePath, parentClass"));
+	}
+
+	// Validate packagePath starts with /Game
+	if (!PackagePath.StartsWith(TEXT("/Game")))
+	{
+		return MakeErrorJson(TEXT("packagePath must start with '/Game'"));
+	}
+
+	// Check if asset already exists
+	FString FullAssetPath = PackagePath / BlueprintName;
+	if (FindBlueprintAsset(BlueprintName) || FindBlueprintAsset(FullAssetPath))
+	{
+		return MakeErrorJson(FString::Printf(
+			TEXT("Blueprint '%s' already exists. Use a different name or delete the existing asset first."),
+			*BlueprintName));
+	}
+
+	// Resolve parent class — try C++ class first, then Blueprint
+	UClass* ParentClass = nullptr;
+
+	for (TObjectIterator<UClass> It; It; ++It)
+	{
+		if (It->GetName() == ParentClassName)
+		{
+			ParentClass = *It;
+			break;
+		}
+	}
+
+	if (!ParentClass)
+	{
+		FString ParentLoadError;
+		UBlueprint* ParentBP = LoadBlueprintByName(ParentClassName, ParentLoadError);
+		if (ParentBP && ParentBP->GeneratedClass)
+		{
+			ParentClass = ParentBP->GeneratedClass;
+		}
+	}
+
+	if (!ParentClass)
+	{
+		return MakeErrorJson(FString::Printf(
+			TEXT("Could not find parent class '%s'. Provide a C++ class name (e.g. 'Actor', 'Pawn') or Blueprint name."),
+			*ParentClassName));
+	}
+
+	// Map blueprintType string to EBlueprintType
+	EBlueprintType BlueprintType = BPTYPE_Normal;
+	if (!BlueprintTypeStr.IsEmpty())
+	{
+		if (BlueprintTypeStr == TEXT("Interface"))
+		{
+			BlueprintType = BPTYPE_Interface;
+		}
+		else if (BlueprintTypeStr == TEXT("FunctionLibrary"))
+		{
+			BlueprintType = BPTYPE_FunctionLibrary;
+		}
+		else if (BlueprintTypeStr == TEXT("MacroLibrary"))
+		{
+			BlueprintType = BPTYPE_MacroLibrary;
+		}
+		else if (BlueprintTypeStr != TEXT("Normal"))
+		{
+			return MakeErrorJson(FString::Printf(
+				TEXT("Invalid blueprintType '%s'. Valid values: Normal, Interface, FunctionLibrary, MacroLibrary"),
+				*BlueprintTypeStr));
+		}
+	}
+
+	// For Interface type, parent must be UInterface
+	if (BlueprintType == BPTYPE_Interface && !ParentClass->IsChildOf(UInterface::StaticClass()))
+	{
+		// Use the engine's standard BlueprintInterface parent
+		ParentClass = UInterface::StaticClass();
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Creating Blueprint '%s' in '%s' with parent '%s' (type=%s)"),
+		*BlueprintName, *PackagePath, *ParentClass->GetName(), *BlueprintTypeStr);
+
+	// Create the package
+	FString FullPackagePath = PackagePath / BlueprintName;
+	UPackage* Package = CreatePackage(*FullPackagePath);
+	if (!Package)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("Failed to create package at '%s'"), *FullPackagePath));
+	}
+
+	// Create the Blueprint
+	UBlueprint* NewBP = FKismetEditorUtilities::CreateBlueprint(
+		ParentClass,
+		Package,
+		FName(*BlueprintName),
+		BlueprintType,
+		UBlueprint::StaticClass(),
+		UBlueprintGeneratedClass::StaticClass()
+	);
+
+	if (!NewBP)
+	{
+		return MakeErrorJson(TEXT("FKismetEditorUtilities::CreateBlueprint returned null"));
+	}
+
+	// Compile
+	FKismetEditorUtilities::CompileBlueprint(NewBP);
+
+	// Save
+	bool bSaved = SaveBlueprintPackage(NewBP);
+
+	// Refresh asset cache
+	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	AllBlueprintAssets.Empty();
+	ARM.Get().GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), AllBlueprintAssets, true);
+
+	// Collect graph names
+	TArray<TSharedPtr<FJsonValue>> GraphNames;
+	for (UEdGraph* Graph : NewBP->UbergraphPages)
+	{
+		GraphNames.Add(MakeShared<FJsonValueString>(Graph->GetName()));
+	}
+	for (UEdGraph* Graph : NewBP->FunctionGraphs)
+	{
+		GraphNames.Add(MakeShared<FJsonValueString>(Graph->GetName()));
+	}
+	for (UEdGraph* Graph : NewBP->MacroGraphs)
+	{
+		GraphNames.Add(MakeShared<FJsonValueString>(Graph->GetName()));
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Created Blueprint '%s' with %d graphs (saved: %s)"),
+		*BlueprintName, GraphNames.Num(), bSaved ? TEXT("true") : TEXT("false"));
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprintName"), BlueprintName);
+	Result->SetStringField(TEXT("packagePath"), PackagePath);
+	Result->SetStringField(TEXT("assetPath"), FullAssetPath);
+	Result->SetStringField(TEXT("parentClass"), ParentClass->GetName());
+	Result->SetStringField(TEXT("blueprintType"), BlueprintTypeStr.IsEmpty() ? TEXT("Normal") : BlueprintTypeStr);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	Result->SetArrayField(TEXT("graphs"), GraphNames);
 	return JsonToString(Result);
 }

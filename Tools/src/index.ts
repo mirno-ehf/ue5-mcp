@@ -1607,6 +1607,41 @@ server.tool(
 );
 
 server.tool(
+  "create_blueprint",
+  "Create a new Blueprint asset. Specify a parent class (C++ or Blueprint) and package path.",
+  {
+    blueprintName: z.string().describe("Name for the new Blueprint (e.g. 'BP_MyActor')"),
+    packagePath: z.string().describe("Package path (e.g. '/Game/Blueprints/Actors')"),
+    parentClass: z.string().describe("Parent class — C++ class (e.g. 'Actor', 'Pawn') or Blueprint name"),
+    blueprintType: z.enum(["Normal", "Interface", "FunctionLibrary", "MacroLibrary"])
+      .optional().default("Normal")
+      .describe("Blueprint type (default: Normal)"),
+  },
+  async ({ blueprintName, packagePath, parentClass, blueprintType }) => {
+    const err = await ensureUE();
+    if (err) return { content: [{ type: "text" as const, text: err }] };
+
+    const data = await uePost("/api/create-blueprint", { blueprintName, packagePath, parentClass, blueprintType });
+    if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+    const lines: string[] = [];
+    lines.push(`Blueprint created successfully.`);
+    lines.push(`Name: ${data.blueprintName}`);
+    lines.push(`Path: ${data.assetPath}`);
+    lines.push(`Parent: ${data.parentClass}`);
+    lines.push(`Type: ${data.blueprintType}`);
+    if (data.graphs?.length) lines.push(`Graphs: ${data.graphs.join(", ")}`);
+    if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+    lines.push(``);
+    lines.push(`Next steps:`);
+    lines.push(`  get_blueprint(blueprint="${data.blueprintName}") — inspect the new Blueprint`);
+    lines.push(`  add_node(blueprint="${data.blueprintName}", ...) — add logic`);
+
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  }
+);
+
+server.tool(
   "set_blueprint_default",
   "Set a default property value on a Blueprint's Class Default Object (CDO). Supports TSubclassOf (class references), object references, and simple types (bool, int, float, string, enum). For class/object values, provide the Blueprint asset name (e.g. 'MyWidget') or C++ class name.",
   {
