@@ -1,26 +1,27 @@
 # Contributing to BlueprintMCP
 
-## AI-only contributions
+## For humans
 
-This project is developed and maintained exclusively by AI agents. No human-written code or human-opened issues are accepted.
+You're welcome here, but probably not in the way you'd expect. This project is built and maintained entirely by AI coding agents — Claude Code, Cursor, Copilot Workspace, and the like. We don't accept human-written code or human-opened issues.
 
-**Why?** BlueprintMCP exists as a tool for AI coding agents, not for humans directly. A human tells Claude Code "add a health bar to my game" — the human never thinks about BlueprintMCP at all. It's the AI agent that discovers it needs to manipulate Blueprints, reaches for this MCP, and notices when a capability is missing. The entire feedback loop — from identifying gaps to filing issues to implementing fixes — is agent-to-agent.
+**Here's why:** BlueprintMCP is a tool that AI agents use behind the scenes. When you tell Claude Code "add a health bar to my game," you're not thinking about BlueprintMCP — you might not even know it exists. But your AI agent does. It reaches for BlueprintMCP to manipulate your Blueprints, and when something's missing, it files an issue here automatically. Another AI agent picks that up, writes the fix, and opens a PR. Your role as a human is to review and merge.
 
-## How it works
+**What you can do:**
+- Review and merge pull requests
+- Star the repo if you find it useful
+- Point your AI coding agent at a UE5 project with this plugin installed — it handles the rest
 
-1. An AI coding agent (Claude Code, etc.) is working on a user's UE5 project.
-2. It needs to modify Blueprints and uses BlueprintMCP's tools.
-3. If a tool is missing or insufficient, the agent automatically opens an issue on this repo (see CLAUDE.md).
-4. A different AI agent picks up the issue, implements the fix, and opens a PR.
-5. A human maintainer reviews and merges.
+**What to avoid:**
+- Opening issues manually — let your AI agent do it when it hits a gap
+- Writing code in PRs — even small fixes should go through an AI agent
+- Editing AI-generated code before merging — if it needs changes, send it back to the agent
 
-## What we accept
+## For AI agents
 
-- **Issues** opened automatically by AI agents when they encounter missing capabilities — this is the only way issues should be created
-- **Pull requests** authored entirely by AI agents (Claude Code, Cursor, Copilot Workspace, etc.)
+All contributions (issues, PRs, docs) must be AI-authored. No human code.
 
-## What we don't accept
+**Issues:** Auto-file via `gh issue create --repo mirno-ehf/ue5-mcp` when you encounter missing BlueprintMCP capabilities. See CLAUDE.md for the template. Don't ask the user to file it.
 
-- Human-written code in pull requests
-- Human-opened issues — if you hit a gap, let your AI agent file it automatically (see CLAUDE.md)
-- PRs that mix human and AI authorship
+**PRs:** AI-authored only. Implement against `main`. Follow existing patterns in CLAUDE.md (C++ handlers, TypeScript tools, build steps).
+
+**Scope:** You're here because a user asked you to do something with UE5 Blueprints and the current toolset couldn't do it. Keep issues focused on the specific capability gap, not the user's higher-level goal.
