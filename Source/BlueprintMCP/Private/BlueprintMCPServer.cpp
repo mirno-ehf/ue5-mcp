@@ -462,6 +462,16 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/list-interfaces")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("listInterfaces")));
 
+	// Event Dispatcher tools
+	Router->BindRoute(FHttpPath(TEXT("/api/add-event-dispatcher")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("addEventDispatcher")));
+	Router->BindRoute(FHttpPath(TEXT("/api/list-event-dispatchers")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("listEventDispatchers")));
+
+	// Function parameter tools
+	Router->BindRoute(FHttpPath(TEXT("/api/add-function-parameter")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("addFunctionParameter")));
+
 	// Snapshot / Safety tools
 	Router->BindRoute(FHttpPath(TEXT("/api/snapshot-graph")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("snapshotGraph")));
@@ -651,6 +661,18 @@ bool FBlueprintMCPServer::ProcessOneRequest()
 	else if (Req->Endpoint == TEXT("listInterfaces"))
 	{
 		Response = HandleListInterfaces(Req->Body);
+	}
+	else if (Req->Endpoint == TEXT("addEventDispatcher"))
+	{
+		Response = HandleAddEventDispatcher(Req->Body);
+	}
+	else if (Req->Endpoint == TEXT("listEventDispatchers"))
+	{
+		Response = HandleListEventDispatchers(Req->Body);
+	}
+	else if (Req->Endpoint == TEXT("addFunctionParameter"))
+	{
+		Response = HandleAddFunctionParameter(Req->Body);
 	}
 	else if (Req->Endpoint == TEXT("snapshotGraph"))
 	{
@@ -6203,6 +6225,159 @@ FString FBlueprintMCPServer::HandleCreateGraph(const FString& Body)
 }
 
 // ============================================================
+// ResolveTypeFromString — shared type resolution helper
+// ============================================================
+
+bool FBlueprintMCPServer::ResolveTypeFromString(
+	const FString& TypeName, FEdGraphPinType& OutPinType, FString& OutError)
+{
+	FString TypeLower = TypeName.ToLower();
+
+	if (TypeLower == TEXT("bool") || TypeLower == TEXT("boolean"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
+	}
+	else if (TypeLower == TEXT("int") || TypeLower == TEXT("int32") || TypeLower == TEXT("integer"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Int;
+	}
+	else if (TypeLower == TEXT("int64"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Int64;
+	}
+	else if (TypeLower == TEXT("float") || TypeLower == TEXT("double") || TypeLower == TEXT("real"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Real;
+		OutPinType.PinSubCategory = TEXT("double");
+	}
+	else if (TypeLower == TEXT("string"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_String;
+	}
+	else if (TypeLower == TEXT("name"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Name;
+	}
+	else if (TypeLower == TEXT("text"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Text;
+	}
+	else if (TypeLower == TEXT("byte"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Byte;
+	}
+	else if (TypeLower == TEXT("vector") || TypeLower == TEXT("fvector"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		OutPinType.PinSubCategoryObject = TBaseStructure<FVector>::Get();
+	}
+	else if (TypeLower == TEXT("rotator") || TypeLower == TEXT("frotator"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		OutPinType.PinSubCategoryObject = TBaseStructure<FRotator>::Get();
+	}
+	else if (TypeLower == TEXT("transform") || TypeLower == TEXT("ftransform"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		OutPinType.PinSubCategoryObject = TBaseStructure<FTransform>::Get();
+	}
+	else if (TypeLower == TEXT("linearcolor") || TypeLower == TEXT("flinearcolor"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		OutPinType.PinSubCategoryObject = TBaseStructure<FLinearColor>::Get();
+	}
+	else if (TypeLower == TEXT("vector2d") || TypeLower == TEXT("fvector2d"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		OutPinType.PinSubCategoryObject = TBaseStructure<FVector2D>::Get();
+	}
+	else if (TypeLower == TEXT("object"))
+	{
+		OutPinType.PinCategory = UEdGraphSchema_K2::PC_Object;
+		OutPinType.PinSubCategoryObject = UObject::StaticClass();
+	}
+	else
+	{
+		// Try as a struct (F-prefix or raw name)
+		FString InternalName = TypeName;
+		bool bTriedAsStruct = false;
+
+		if (TypeName.StartsWith(TEXT("F")) || TypeName.StartsWith(TEXT("S_")) || (!TypeName.StartsWith(TEXT("E"))))
+		{
+			if (TypeName.StartsWith(TEXT("F")))
+			{
+				InternalName = TypeName.Mid(1);
+			}
+
+			UScriptStruct* FoundStruct = FindFirstObject<UScriptStruct>(*InternalName);
+			if (!FoundStruct)
+			{
+				for (TObjectIterator<UScriptStruct> It; It; ++It)
+				{
+					if (It->GetName() == InternalName || It->GetName() == TypeName)
+					{
+						FoundStruct = *It;
+						break;
+					}
+				}
+			}
+
+			if (FoundStruct)
+			{
+				OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+				OutPinType.PinSubCategoryObject = FoundStruct;
+				bTriedAsStruct = true;
+			}
+		}
+
+		if (!bTriedAsStruct)
+		{
+			// Try as an enum (E-prefix or raw name)
+			FString EnumInternalName = TypeName;
+			if (TypeName.StartsWith(TEXT("E")))
+			{
+				EnumInternalName = TypeName.Mid(1);
+			}
+
+			UEnum* FoundEnum = FindFirstObject<UEnum>(*EnumInternalName);
+			if (!FoundEnum)
+			{
+				for (TObjectIterator<UEnum> It; It; ++It)
+				{
+					if (It->GetName() == EnumInternalName || It->GetName() == TypeName)
+					{
+						FoundEnum = *It;
+						break;
+					}
+				}
+			}
+
+			if (FoundEnum)
+			{
+				if (FoundEnum->GetCppForm() == UEnum::ECppForm::EnumClass)
+				{
+					OutPinType.PinCategory = UEdGraphSchema_K2::PC_Enum;
+				}
+				else
+				{
+					OutPinType.PinCategory = UEdGraphSchema_K2::PC_Byte;
+				}
+				OutPinType.PinSubCategoryObject = FoundEnum;
+			}
+			else
+			{
+				OutError = FString::Printf(
+					TEXT("Unknown type '%s'. Use: bool, int, float, string, name, text, byte, vector, rotator, transform, or a struct/enum name (e.g. FVector, EMyEnum)"),
+					*TypeName);
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+// ============================================================
 // HandleAddVariable — add a new member variable to a Blueprint
 // ============================================================
 
@@ -6260,148 +6435,12 @@ FString FBlueprintMCPServer::HandleAddVariable(const FString& Body)
 		}
 	}
 
-	// Build FEdGraphPinType based on variableType
+	// Resolve the type using the shared helper
 	FEdGraphPinType PinType;
-	FString TypeLower = VariableType.ToLower();
-
-	if (TypeLower == TEXT("bool") || TypeLower == TEXT("boolean"))
+	FString TypeError;
+	if (!ResolveTypeFromString(VariableType, PinType, TypeError))
 	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
-	}
-	else if (TypeLower == TEXT("int") || TypeLower == TEXT("int32") || TypeLower == TEXT("integer"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Int;
-	}
-	else if (TypeLower == TEXT("int64"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Int64;
-	}
-	else if (TypeLower == TEXT("float") || TypeLower == TEXT("double") || TypeLower == TEXT("real"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Real;
-		PinType.PinSubCategory = TEXT("double");
-	}
-	else if (TypeLower == TEXT("string"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_String;
-	}
-	else if (TypeLower == TEXT("name"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Name;
-	}
-	else if (TypeLower == TEXT("text"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Text;
-	}
-	else if (TypeLower == TEXT("byte"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Byte;
-	}
-	else if (TypeLower == TEXT("vector") || TypeLower == TEXT("fvector"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
-		PinType.PinSubCategoryObject = TBaseStructure<FVector>::Get();
-	}
-	else if (TypeLower == TEXT("rotator") || TypeLower == TEXT("frotator"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
-		PinType.PinSubCategoryObject = TBaseStructure<FRotator>::Get();
-	}
-	else if (TypeLower == TEXT("transform") || TypeLower == TEXT("ftransform"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
-		PinType.PinSubCategoryObject = TBaseStructure<FTransform>::Get();
-	}
-	else if (TypeLower == TEXT("linearcolor") || TypeLower == TEXT("flinearcolor"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
-		PinType.PinSubCategoryObject = TBaseStructure<FLinearColor>::Get();
-	}
-	else if (TypeLower == TEXT("vector2d") || TypeLower == TEXT("fvector2d"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
-		PinType.PinSubCategoryObject = TBaseStructure<FVector2D>::Get();
-	}
-	else if (TypeLower == TEXT("object"))
-	{
-		PinType.PinCategory = UEdGraphSchema_K2::PC_Object;
-		PinType.PinSubCategoryObject = UObject::StaticClass();
-	}
-	else
-	{
-		// Try as a struct (F-prefix or raw name)
-		FString InternalName = VariableType;
-		bool bTriedAsStruct = false;
-
-		if (VariableType.StartsWith(TEXT("F")) || VariableType.StartsWith(TEXT("S_")) || (!VariableType.StartsWith(TEXT("E"))))
-		{
-			if (VariableType.StartsWith(TEXT("F")))
-			{
-				InternalName = VariableType.Mid(1);
-			}
-
-			UScriptStruct* FoundStruct = FindFirstObject<UScriptStruct>(*InternalName);
-			if (!FoundStruct)
-			{
-				for (TObjectIterator<UScriptStruct> It; It; ++It)
-				{
-					if (It->GetName() == InternalName || It->GetName() == VariableType)
-					{
-						FoundStruct = *It;
-						break;
-					}
-				}
-			}
-
-			if (FoundStruct)
-			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
-				PinType.PinSubCategoryObject = FoundStruct;
-				bTriedAsStruct = true;
-			}
-		}
-
-		if (!bTriedAsStruct)
-		{
-			// Try as an enum (E-prefix or raw name)
-			FString EnumInternalName = VariableType;
-			if (VariableType.StartsWith(TEXT("E")))
-			{
-				EnumInternalName = VariableType.Mid(1);
-			}
-
-			UEnum* FoundEnum = FindFirstObject<UEnum>(*EnumInternalName);
-			if (!FoundEnum)
-			{
-				for (TObjectIterator<UEnum> It; It; ++It)
-				{
-					if (It->GetName() == EnumInternalName || It->GetName() == VariableType)
-					{
-						FoundEnum = *It;
-						break;
-					}
-				}
-			}
-
-			if (FoundEnum)
-			{
-				if (FoundEnum->GetCppForm() == UEnum::ECppForm::EnumClass)
-				{
-					PinType.PinCategory = UEdGraphSchema_K2::PC_Enum;
-				}
-				else
-				{
-					PinType.PinCategory = UEdGraphSchema_K2::PC_Byte;
-				}
-				PinType.PinSubCategoryObject = FoundEnum;
-			}
-			else
-			{
-				return MakeErrorJson(FString::Printf(
-					TEXT("Unknown variable type '%s'. Use: bool, int, float, string, name, text, byte, vector, rotator, transform, or a struct/enum name (e.g. FVector, EMyEnum)"),
-					*VariableType));
-			}
-		}
+		return MakeErrorJson(TypeError);
 	}
 
 	// Set container type for arrays
@@ -6821,6 +6860,432 @@ FString FBlueprintMCPServer::HandleRemoveInterface(const FString& Body)
 	Result->SetStringField(TEXT("blueprint"), BlueprintName);
 	Result->SetStringField(TEXT("interfaceName"), FoundInterface->GetName());
 	Result->SetBoolField(TEXT("preservedFunctions"), bPreserveFunctions);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleAddEventDispatcher — create a multicast delegate on a Blueprint
+// ============================================================
+
+FString FBlueprintMCPServer::HandleAddEventDispatcher(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString DispatcherName = Json->GetStringField(TEXT("dispatcherName"));
+
+	if (BlueprintName.IsEmpty() || DispatcherName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, dispatcherName"));
+	}
+
+	// Load Blueprint
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP)
+	{
+		return MakeErrorJson(LoadError);
+	}
+
+	FName DispatcherFName(*DispatcherName);
+
+	// Check for name uniqueness against existing variables
+	for (const FBPVariableDescription& Var : BP->NewVariables)
+	{
+		if (Var.VarName == DispatcherFName)
+		{
+			return MakeErrorJson(FString::Printf(
+				TEXT("A variable or dispatcher named '%s' already exists in Blueprint '%s'"),
+				*DispatcherName, *BlueprintName));
+		}
+	}
+
+	// Check against existing graphs (functions, macros, etc.)
+	TArray<UEdGraph*> AllGraphs;
+	BP->GetAllGraphs(AllGraphs);
+	for (UEdGraph* Existing : AllGraphs)
+	{
+		if (Existing && Existing->GetName().Equals(DispatcherName, ESearchCase::IgnoreCase))
+		{
+			return MakeErrorJson(FString::Printf(
+				TEXT("A graph named '%s' already exists in Blueprint '%s'"),
+				*DispatcherName, *BlueprintName));
+		}
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Adding event dispatcher '%s' to Blueprint '%s'"),
+		*DispatcherName, *BlueprintName);
+
+	// Step 1: Add a member variable with PC_MCDelegate pin type
+	FEdGraphPinType DelegateType;
+	DelegateType.PinCategory = UEdGraphSchema_K2::PC_MCDelegate;
+	bool bVarAdded = FBlueprintEditorUtils::AddMemberVariable(BP, DispatcherFName, DelegateType);
+	if (!bVarAdded)
+	{
+		return MakeErrorJson(FString::Printf(
+			TEXT("Failed to add delegate variable for '%s'"), *DispatcherName));
+	}
+
+	// Step 2: Create the signature graph
+	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+
+	UEdGraph* SigGraph = FBlueprintEditorUtils::CreateNewGraph(BP, DispatcherFName,
+		UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+	if (!SigGraph)
+	{
+		return MakeErrorJson(TEXT("Failed to create delegate signature graph"));
+	}
+
+	K2Schema->CreateDefaultNodesForGraph(*SigGraph);
+	K2Schema->CreateFunctionGraphTerminators(*SigGraph, static_cast<UClass*>(nullptr));
+	K2Schema->AddExtraFunctionFlags(SigGraph, FUNC_BlueprintCallable | FUNC_BlueprintEvent | FUNC_Public);
+	K2Schema->MarkFunctionEntryAsEditable(SigGraph, true);
+
+	BP->DelegateSignatureGraphs.Add(SigGraph);
+
+	// Step 3: Add parameters if provided
+	TArray<TSharedPtr<FJsonValue>> ParamsArr;
+	if (Json->HasField(TEXT("parameters")))
+	{
+		ParamsArr = Json->GetArrayField(TEXT("parameters"));
+	}
+
+	TArray<TSharedPtr<FJsonValue>> AddedParamsJson;
+
+	if (ParamsArr.Num() > 0)
+	{
+		// Find the entry node in the signature graph
+		UK2Node_EditablePinBase* EntryNode = nullptr;
+		for (UEdGraphNode* Node : SigGraph->Nodes)
+		{
+			if (UK2Node_FunctionEntry* FE = Cast<UK2Node_FunctionEntry>(Node))
+			{
+				EntryNode = FE;
+				break;
+			}
+		}
+
+		if (!EntryNode)
+		{
+			// Still save what we have
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+			SaveBlueprintPackage(BP);
+			return MakeErrorJson(TEXT("Event dispatcher created but entry node not found — parameters could not be added"));
+		}
+
+		for (const TSharedPtr<FJsonValue>& ParamVal : ParamsArr)
+		{
+			if (!ParamVal.IsValid() || ParamVal->Type != EJson::Object) continue;
+			TSharedPtr<FJsonObject> ParamObj = ParamVal->AsObject();
+
+			FString ParamName = ParamObj->GetStringField(TEXT("name"));
+			FString ParamType = ParamObj->GetStringField(TEXT("type"));
+
+			if (ParamName.IsEmpty() || ParamType.IsEmpty()) continue;
+
+			FEdGraphPinType PinType;
+			FString TypeError;
+			if (!ResolveTypeFromString(ParamType, PinType, TypeError))
+			{
+				return MakeErrorJson(FString::Printf(
+					TEXT("Parameter '%s': %s"), *ParamName, *TypeError));
+			}
+
+			EntryNode->CreateUserDefinedPin(FName(*ParamName), PinType, EGPD_Output);
+
+			TSharedRef<FJsonObject> ParamJson = MakeShared<FJsonObject>();
+			ParamJson->SetStringField(TEXT("name"), ParamName);
+			ParamJson->SetStringField(TEXT("type"), ParamType);
+			AddedParamsJson.Add(MakeShared<FJsonValueObject>(ParamJson));
+		}
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	bool bSaved = SaveBlueprintPackage(BP);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Added event dispatcher '%s' to '%s' with %d params (saved: %s)"),
+		*DispatcherName, *BlueprintName, AddedParamsJson.Num(), bSaved ? TEXT("true") : TEXT("false"));
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("dispatcherName"), DispatcherName);
+	Result->SetArrayField(TEXT("parameters"), AddedParamsJson);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleListEventDispatchers — list all event dispatchers on a Blueprint
+// ============================================================
+
+FString FBlueprintMCPServer::HandleListEventDispatchers(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	if (BlueprintName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required field: blueprint"));
+	}
+
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP)
+	{
+		return MakeErrorJson(LoadError);
+	}
+
+	TSet<FName> DelegateNameSet;
+	FBlueprintEditorUtils::GetDelegateNameList(BP, DelegateNameSet);
+
+	TArray<TSharedPtr<FJsonValue>> DispatchersArr;
+
+	for (const FName& DelegateName : DelegateNameSet)
+	{
+		TSharedRef<FJsonObject> DispObj = MakeShared<FJsonObject>();
+		DispObj->SetStringField(TEXT("name"), DelegateName.ToString());
+
+		// Get parameter info from the signature graph
+		TArray<TSharedPtr<FJsonValue>> ParamsArr;
+
+		UEdGraph* SigGraph = FBlueprintEditorUtils::GetDelegateSignatureGraphByName(BP, DelegateName);
+		if (SigGraph)
+		{
+			for (UEdGraphNode* Node : SigGraph->Nodes)
+			{
+				UK2Node_FunctionEntry* FE = Cast<UK2Node_FunctionEntry>(Node);
+				if (!FE) continue;
+
+				for (const TSharedPtr<FUserPinInfo>& PinInfo : FE->UserDefinedPins)
+				{
+					if (!PinInfo.IsValid()) continue;
+
+					TSharedRef<FJsonObject> ParamObj = MakeShared<FJsonObject>();
+					ParamObj->SetStringField(TEXT("name"), PinInfo->PinName.ToString());
+
+					// Build a human-readable type name from the pin type
+					FString TypeStr = PinInfo->PinType.PinCategory.ToString();
+					if (PinInfo->PinType.PinSubCategoryObject.IsValid())
+					{
+						TypeStr = PinInfo->PinType.PinSubCategoryObject->GetName();
+					}
+					ParamObj->SetStringField(TEXT("type"), TypeStr);
+
+					ParamsArr.Add(MakeShared<FJsonValueObject>(ParamObj));
+				}
+				break; // only need the first entry node
+			}
+		}
+
+		DispObj->SetArrayField(TEXT("parameters"), ParamsArr);
+		DispatchersArr.Add(MakeShared<FJsonValueObject>(DispObj));
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetNumberField(TEXT("count"), DispatchersArr.Num());
+	Result->SetArrayField(TEXT("dispatchers"), DispatchersArr);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleAddFunctionParameter — add a parameter to a function,
+//   custom event, or event dispatcher signature
+// ============================================================
+
+FString FBlueprintMCPServer::HandleAddFunctionParameter(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString FunctionName = Json->GetStringField(TEXT("functionName"));
+	FString ParamName = Json->GetStringField(TEXT("paramName"));
+	FString ParamType = Json->GetStringField(TEXT("paramType"));
+
+	if (BlueprintName.IsEmpty() || FunctionName.IsEmpty() || ParamName.IsEmpty() || ParamType.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, functionName, paramName, paramType"));
+	}
+
+	// Load Blueprint
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP)
+	{
+		return MakeErrorJson(LoadError);
+	}
+
+	// Resolve param type
+	FEdGraphPinType PinType;
+	FString TypeError;
+	if (!ResolveTypeFromString(ParamType, PinType, TypeError))
+	{
+		return MakeErrorJson(TypeError);
+	}
+
+	// Find the entry node using 3 strategies
+	UK2Node_EditablePinBase* EntryNode = nullptr;
+	FString NodeType;
+
+	FName FuncFName(*FunctionName);
+
+	// Strategy 1: K2Node_FunctionEntry in function graphs
+	TArray<UEdGraph*> AllGraphs;
+	BP->GetAllGraphs(AllGraphs);
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (!Graph || !Graph->GetName().Equals(FunctionName, ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+
+		// Skip delegate signature graphs (handled in Strategy 3)
+		if (BP->DelegateSignatureGraphs.Contains(Graph))
+		{
+			continue;
+		}
+
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (UK2Node_FunctionEntry* FE = Cast<UK2Node_FunctionEntry>(Node))
+			{
+				EntryNode = FE;
+				NodeType = TEXT("FunctionEntry");
+				break;
+			}
+		}
+		if (EntryNode) break;
+	}
+
+	// Strategy 2: K2Node_CustomEvent with matching CustomFunctionName
+	if (!EntryNode)
+	{
+		for (UEdGraph* Graph : AllGraphs)
+		{
+			if (!Graph) continue;
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (UK2Node_CustomEvent* CE = Cast<UK2Node_CustomEvent>(Node))
+				{
+					if (CE->CustomFunctionName.ToString().Equals(FunctionName, ESearchCase::IgnoreCase))
+					{
+						EntryNode = CE;
+						NodeType = TEXT("CustomEvent");
+						break;
+					}
+				}
+			}
+			if (EntryNode) break;
+		}
+	}
+
+	// Strategy 3: K2Node_FunctionEntry in DelegateSignatureGraphs
+	if (!EntryNode)
+	{
+		for (UEdGraph* SigGraph : BP->DelegateSignatureGraphs)
+		{
+			if (!SigGraph || !SigGraph->GetName().Equals(FunctionName, ESearchCase::IgnoreCase))
+			{
+				continue;
+			}
+
+			for (UEdGraphNode* Node : SigGraph->Nodes)
+			{
+				if (UK2Node_FunctionEntry* FE = Cast<UK2Node_FunctionEntry>(Node))
+				{
+					EntryNode = FE;
+					NodeType = TEXT("EventDispatcher");
+					break;
+				}
+			}
+			if (EntryNode) break;
+		}
+	}
+
+	if (!EntryNode)
+	{
+		// Build a helpful error listing available functions, events, and dispatchers
+		TArray<TSharedPtr<FJsonValue>> AvailFuncs;
+
+		for (UEdGraph* Graph : BP->FunctionGraphs)
+		{
+			if (Graph) AvailFuncs.Add(MakeShared<FJsonValueString>(Graph->GetName()));
+		}
+
+		// Custom events
+		for (UEdGraph* Graph : AllGraphs)
+		{
+			if (!Graph) continue;
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (UK2Node_CustomEvent* CE = Cast<UK2Node_CustomEvent>(Node))
+				{
+					AvailFuncs.Add(MakeShared<FJsonValueString>(
+						FString::Printf(TEXT("%s (custom event)"), *CE->CustomFunctionName.ToString())));
+				}
+			}
+		}
+
+		// Dispatchers
+		TSet<FName> DelegateNames;
+		FBlueprintEditorUtils::GetDelegateNameList(BP, DelegateNames);
+		for (const FName& DN : DelegateNames)
+		{
+			AvailFuncs.Add(MakeShared<FJsonValueString>(
+				FString::Printf(TEXT("%s (event dispatcher)"), *DN.ToString())));
+		}
+
+		TSharedRef<FJsonObject> ErrorResult = MakeShared<FJsonObject>();
+		ErrorResult->SetStringField(TEXT("error"), FString::Printf(
+			TEXT("Function, custom event, or event dispatcher '%s' not found in Blueprint '%s'"),
+			*FunctionName, *BlueprintName));
+		ErrorResult->SetArrayField(TEXT("availableFunctions"), AvailFuncs);
+		return JsonToString(ErrorResult);
+	}
+
+	// Check for duplicate parameter name
+	for (const TSharedPtr<FUserPinInfo>& Existing : EntryNode->UserDefinedPins)
+	{
+		if (Existing.IsValid() && Existing->PinName.ToString().Equals(ParamName, ESearchCase::IgnoreCase))
+		{
+			return MakeErrorJson(FString::Printf(
+				TEXT("Parameter '%s' already exists on '%s'"), *ParamName, *FunctionName));
+		}
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Adding parameter '%s' (type=%s) to %s '%s' in Blueprint '%s'"),
+		*ParamName, *ParamType, *NodeType, *FunctionName, *BlueprintName);
+
+	// Add the parameter pin (EGPD_Output on entry = input to callers)
+	EntryNode->CreateUserDefinedPin(FName(*ParamName), PinType, EGPD_Output);
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	bool bSaved = SaveBlueprintPackage(BP);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Added parameter '%s' to '%s' in '%s' (saved: %s)"),
+		*ParamName, *FunctionName, *BlueprintName, bSaved ? TEXT("true") : TEXT("false"));
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("functionName"), FunctionName);
+	Result->SetStringField(TEXT("paramName"), ParamName);
+	Result->SetStringField(TEXT("paramType"), ParamType);
+	Result->SetStringField(TEXT("nodeType"), NodeType);
 	Result->SetBoolField(TEXT("saved"), bSaved);
 	return JsonToString(Result);
 }

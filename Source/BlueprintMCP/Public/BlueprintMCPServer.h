@@ -4,6 +4,7 @@
 #include "Dom/JsonObject.h"
 #include "AssetRegistry/AssetData.h"
 #include "HttpResultCallback.h"
+#include "EdGraph/EdGraphPin.h"
 
 class UEdGraph;
 class UEdGraphNode;
@@ -146,6 +147,13 @@ private:
 	FString HandleRemoveInterface(const FString& Body);
 	FString HandleListInterfaces(const FString& Body);
 
+	// ----- Event Dispatchers -----
+	FString HandleAddEventDispatcher(const FString& Body);
+	FString HandleListEventDispatchers(const FString& Body);
+
+	// ----- Function Parameters -----
+	FString HandleAddFunctionParameter(const FString& Body);
+
 	// ----- Property defaults -----
 	FString HandleSetBlueprintDefault(const FString& Body);
 
@@ -175,6 +183,9 @@ private:
 	FString MakeErrorJson(const FString& Message);
 	bool SaveBlueprintPackage(UBlueprint* BP);
 	static FString UrlDecode(const FString& EncodedString);
+
+	// ----- Type resolution -----
+	bool ResolveTypeFromString(const FString& TypeName, FEdGraphPinType& OutPinType, FString& OutError);
 
 	// ----- Snapshot storage -----
 	TMap<FString, FGraphSnapshot> Snapshots;
