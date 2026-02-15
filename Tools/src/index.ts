@@ -14,6 +14,7 @@ import { registerComponentTools } from "./tools/components.js";
 import { registerSnapshotTools } from "./tools/snapshot.js";
 import { registerValidationTools } from "./tools/validation.js";
 import { registerUtilityTools } from "./tools/utility.js";
+import { registerDiscoveryTools } from "./tools/discovery.js";
 
 // Resource registrations
 import { registerBlueprintListResource } from "./resources/blueprint-list.js";
@@ -36,6 +37,7 @@ registerComponentTools(server);
 registerSnapshotTools(server);
 registerValidationTools(server);
 registerUtilityTools(server);
+registerDiscoveryTools(server);
 
 // Register resources
 registerBlueprintListResource(server);

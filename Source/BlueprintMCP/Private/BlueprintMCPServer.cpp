@@ -432,6 +432,16 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("getNodeComment")));
 	Router->BindRoute(FHttpPath(TEXT("/api/set-node-comment")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("setNodeComment")));
+	Router->BindRoute(FHttpPath(TEXT("/api/get-pin-info")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("getPinInfo")));
+	Router->BindRoute(FHttpPath(TEXT("/api/check-pin-compatibility")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("checkPinCompatibility")));
+	Router->BindRoute(FHttpPath(TEXT("/api/list-classes")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("listClasses")));
+	Router->BindRoute(FHttpPath(TEXT("/api/list-functions")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("listFunctions")));
+	Router->BindRoute(FHttpPath(TEXT("/api/list-properties")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("listProperties")));
 	Router->BindRoute(FHttpPath(TEXT("/api/change-struct-node-type")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("changeStructNodeType")));
 	Router->BindRoute(FHttpPath(TEXT("/api/remove-function-parameter")), EHttpServerRequestVerbs::VERB_POST,
@@ -656,6 +666,11 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("moveNode"),               [this](const TMap<FString, FString>&, const FString& B) { return HandleMoveNode(B); });
 	HandlerMap.Add(TEXT("getNodeComment"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleGetNodeComment(B); });
 	HandlerMap.Add(TEXT("setNodeComment"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleSetNodeComment(B); });
+	HandlerMap.Add(TEXT("getPinInfo"),              [this](const TMap<FString, FString>&, const FString& B) { return HandleGetPinInfo(B); });
+	HandlerMap.Add(TEXT("checkPinCompatibility"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleCheckPinCompatibility(B); });
+	HandlerMap.Add(TEXT("listClasses"),             [this](const TMap<FString, FString>&, const FString& B) { return HandleListClasses(B); });
+	HandlerMap.Add(TEXT("listFunctions"),           [this](const TMap<FString, FString>&, const FString& B) { return HandleListFunctions(B); });
+	HandlerMap.Add(TEXT("listProperties"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleListProperties(B); });
 	HandlerMap.Add(TEXT("changeStructNodeType"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleChangeStructNodeType(B); });
 	HandlerMap.Add(TEXT("deleteNode"),              [this](const TMap<FString, FString>&, const FString& B) { return HandleDeleteNode(B); });
 	HandlerMap.Add(TEXT("duplicateNodes"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleDuplicateNodes(B); });

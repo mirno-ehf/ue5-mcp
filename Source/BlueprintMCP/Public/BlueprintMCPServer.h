@@ -137,6 +137,15 @@ private:
 	FString HandleGetNodeComment(const FString& Body);
 	FString HandleSetNodeComment(const FString& Body);
 
+	// ----- Pin introspection (read-only) -----
+	FString HandleGetPinInfo(const FString& Body);
+	FString HandleCheckPinCompatibility(const FString& Body);
+
+	// ----- Class/function discovery (read-only) -----
+	FString HandleListClasses(const FString& Body);
+	FString HandleListFunctions(const FString& Body);
+	FString HandleListProperties(const FString& Body);
+
 	// ----- Struct node manipulation (write) -----
 	FString HandleChangeStructNodeType(const FString& Body);
 
