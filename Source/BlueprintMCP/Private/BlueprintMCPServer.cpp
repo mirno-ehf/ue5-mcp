@@ -124,11 +124,11 @@ UBlueprint* FBlueprintMCPServer::LoadBlueprintByName(const FString& NameOrPath, 
 				return LevelBP;
 			}
 		}
-		OutError = FString::Printf(TEXT("Map '%s' loaded but level blueprint could not be retrieved"), *NameOrPath);
+		OutError = FString::Printf(TEXT("Map '%s' loaded but its level blueprint could not be retrieved. The map may not contain a level blueprint."), *NameOrPath);
 		return nullptr;
 	}
 
-	OutError = FString::Printf(TEXT("Blueprint or map '%s' not found"), *NameOrPath);
+	OutError = FString::Printf(TEXT("Blueprint or map '%s' not found. Use list_blueprints to see available assets. Level blueprints are referenced by their map name (e.g. 'MAP_Ward')."), *NameOrPath);
 	return nullptr;
 }
 

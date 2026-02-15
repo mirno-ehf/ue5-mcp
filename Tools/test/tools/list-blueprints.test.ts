@@ -41,4 +41,34 @@ describe("list_blueprints", () => {
     expect(bp.name).toBeDefined();
     expect(bp.path).toBeDefined();
   });
+
+  it("type=regular excludes level blueprints", async () => {
+    const data = await ueGet("/api/list", { type: "regular" });
+    expect(data.error).toBeUndefined();
+    const levelBPs = data.blueprints.filter((bp: any) => bp.isLevelBlueprint);
+    expect(levelBPs).toHaveLength(0);
+  });
+
+  it("type=level returns only level blueprints", async () => {
+    const data = await ueGet("/api/list", { type: "level" });
+    expect(data.error).toBeUndefined();
+    // Every entry should be a level blueprint
+    for (const bp of data.blueprints) {
+      expect(bp.isLevelBlueprint).toBe(true);
+    }
+  });
+
+  it("type=all returns both regular and level blueprints", async () => {
+    const all = await ueGet("/api/list", { type: "all" });
+    const regular = await ueGet("/api/list", { type: "regular" });
+    const level = await ueGet("/api/list", { type: "level" });
+    expect(all.error).toBeUndefined();
+    expect(all.count).toBe(regular.count + level.count);
+  });
+
+  it("regular blueprint entries do not have isLevelBlueprint", async () => {
+    const data = await ueGet("/api/list", { filter: bpName });
+    expect(data.count).toBe(1);
+    expect(data.blueprints[0].isLevelBlueprint).toBeUndefined();
+  });
 });

@@ -7,24 +7,29 @@ import { describeGraph } from "../graph-describe.js";
 export function registerReadTools(server: McpServer): void {
   server.tool(
     "list_blueprints",
-    "List all Blueprint assets in the UE5 project, including level blueprints from .umap files. Optionally filter by name/path substring or parent class.",
+    "List all Blueprint assets in the UE5 project, including level blueprints from .umap files. Optionally filter by name/path substring, parent class, or type (regular vs level).",
     {
       filter: z.string().optional().describe("Substring to match against Blueprint name or path"),
       parentClass: z.string().optional().describe("Filter by parent class name"),
+      type: z.enum(["all", "regular", "level"]).optional().default("all").describe("Filter by blueprint type: 'all' (default), 'regular' (standard BPs only), 'level' (level blueprints only)"),
     },
-    async ({ filter, parentClass }) => {
+    async ({ filter, parentClass, type: bpType }) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
       const data = await ueGet("/api/list", {
         filter: filter || "",
         parentClass: parentClass || "",
+        type: bpType || "all",
       });
 
       if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
 
       const lines = data.blueprints.map(
-        (bp: any) => `${bp.name} (${bp.path}) [${bp.parentClass || "?"}]`
+        (bp: any) => {
+          const levelTag = bp.isLevelBlueprint ? " Level" : "";
+          return `${bp.name} (${bp.path}) [${bp.parentClass || "?"}${levelTag}]`;
+        }
       );
       const summary = `Found ${data.count} of ${data.total} blueprints.\n\n${lines.join("\n")}`;
       return { content: [{ type: "text" as const, text: summary }] };
@@ -92,11 +97,13 @@ export function registerReadTools(server: McpServer): void {
       if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
 
       const lines = data.results.map(
-        (r: any) =>
-          `[${r.blueprint}] ${r.graph} > ${r.nodeTitle}` +
-          (r.functionName ? ` fn:${r.functionName}` : "") +
-          (r.eventName ? ` event:${r.eventName}` : "") +
-          (r.variableName ? ` var:${r.variableName}` : "")
+        (r: any) => {
+          const levelTag = r.isLevelBlueprint ? " Level" : "";
+          return `[${r.blueprint}${levelTag}] ${r.graph} > ${r.nodeTitle}` +
+            (r.functionName ? ` fn:${r.functionName}` : "") +
+            (r.eventName ? ` event:${r.eventName}` : "") +
+            (r.variableName ? ` var:${r.variableName}` : "");
+        }
       );
       const summary = `Found ${data.resultCount} results for "${query}":\n\n${lines.join("\n")}`;
       return { content: [{ type: "text" as const, text: summary }] };
@@ -197,43 +204,65 @@ export function registerReadTools(server: McpServer): void {
       const data = await ueGet("/api/search-by-type", params);
       if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
 
+      // C++ returns a flat `results` array with a `usage` field on each entry.
+      // Categorize by usage type for readable output.
+      const results: any[] = data.results || [];
+      const variables = results.filter((r: any) => r.usage === "variable");
+      const funcParams = results.filter((r: any) => r.usage === "functionParameter");
+      const eventParams = results.filter((r: any) => r.usage === "eventParameter");
+      const breakStructs = results.filter((r: any) => r.usage === "breakStruct");
+      const makeStructs = results.filter((r: any) => r.usage === "makeStruct");
+      const pinConns = results.filter((r: any) => r.usage === "pinConnection");
+
+      const tag = (r: any) => r.isLevelBlueprint ? " Level" : "";
+
       const lines: string[] = [];
-      lines.push(`Usages of type "${typeName}":`);
+      lines.push(`Usages of type "${typeName}" (${data.resultCount} result(s)):`);
 
-      if (data.variables?.length) {
-        lines.push(`\nVariables (${data.variables.length}):`);
-        for (const v of data.variables) {
-          lines.push(`  ${v.blueprint}.${v.variableName}: ${v.type}`);
+      if (variables.length) {
+        lines.push(`\nVariables (${variables.length}):`);
+        for (const v of variables) {
+          lines.push(`  [${v.blueprint}${tag(v)}] ${v.location}: ${v.currentType}${v.currentSubtype ? `<${v.currentSubtype}>` : ""}`);
         }
       }
 
-      if (data.parameters?.length) {
-        lines.push(`\nFunction/Event Parameters (${data.parameters.length}):`);
-        for (const p of data.parameters) {
-          lines.push(`  ${p.blueprint}.${p.functionName}.${p.paramName}: ${p.type}`);
+      if (funcParams.length) {
+        lines.push(`\nFunction Parameters (${funcParams.length}):`);
+        for (const p of funcParams) {
+          lines.push(`  [${p.blueprint}${tag(p)}] ${p.location}: ${p.currentType}${p.currentSubtype ? `<${p.currentSubtype}>` : ""}`);
         }
       }
 
-      if (data.structNodes?.length) {
-        lines.push(`\nBreak/Make Struct Nodes (${data.structNodes.length}):`);
-        for (const n of data.structNodes) {
-          lines.push(`  ${n.blueprint} > ${n.graph} > ${n.nodeTitle} (${n.nodeId})`);
+      if (eventParams.length) {
+        lines.push(`\nEvent Parameters (${eventParams.length}):`);
+        for (const p of eventParams) {
+          lines.push(`  [${p.blueprint}${tag(p)}] ${p.location}: ${p.currentType}${p.currentSubtype ? `<${p.currentSubtype}>` : ""}`);
         }
       }
 
-      if (data.otherUsages?.length) {
-        lines.push(`\nOther Usages (${data.otherUsages.length}):`);
-        for (const u of data.otherUsages) {
-          lines.push(`  ${u.blueprint} > ${u.graph} > ${u.description}`);
+      if (breakStructs.length) {
+        lines.push(`\nBreak Struct Nodes (${breakStructs.length}):`);
+        for (const n of breakStructs) {
+          lines.push(`  [${n.blueprint}${tag(n)}] ${n.location} (${n.structType})`);
         }
       }
 
-      const total = (data.variables?.length || 0) + (data.parameters?.length || 0) +
-        (data.structNodes?.length || 0) + (data.otherUsages?.length || 0);
-      if (total === 0) {
+      if (makeStructs.length) {
+        lines.push(`\nMake Struct Nodes (${makeStructs.length}):`);
+        for (const n of makeStructs) {
+          lines.push(`  [${n.blueprint}${tag(n)}] ${n.location} (${n.structType})`);
+        }
+      }
+
+      if (pinConns.length) {
+        lines.push(`\nPin Connections (${pinConns.length}):`);
+        for (const p of pinConns) {
+          lines.push(`  [${p.blueprint}${tag(p)}] ${p.graph} > ${p.location} (${p.connectionCount} connection(s))`);
+        }
+      }
+
+      if (results.length === 0) {
         lines.push(`\nNo usages found.`);
-      } else {
-        lines.push(`\nTotal: ${total} usage(s)`);
       }
 
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };

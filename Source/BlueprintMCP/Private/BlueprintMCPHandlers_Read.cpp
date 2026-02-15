@@ -28,8 +28,13 @@ FString FBlueprintMCPServer::HandleList(const TMap<FString, FString>& Params)
 {
 	const FString* Filter = Params.Find(TEXT("filter"));
 	const FString* ParentClassFilter = Params.Find(TEXT("parentClass"));
+	const FString* TypeFilter = Params.Find(TEXT("type"));
+	// type: "all" (default), "regular", "level"
+	bool bIncludeRegular = !TypeFilter || TypeFilter->IsEmpty() || *TypeFilter == TEXT("all") || *TypeFilter == TEXT("regular");
+	bool bIncludeLevel = !TypeFilter || TypeFilter->IsEmpty() || *TypeFilter == TEXT("all") || *TypeFilter == TEXT("level");
 
 	TArray<TSharedPtr<FJsonValue>> Entries;
+	if (bIncludeRegular)
 	for (const FAssetData& Asset : AllBlueprintAssets)
 	{
 		FString Name = Asset.AssetName.ToString();
@@ -69,6 +74,7 @@ FString FBlueprintMCPServer::HandleList(const TMap<FString, FString>& Params)
 	}
 
 	// Also include level blueprints from maps
+	if (bIncludeLevel)
 	for (const FAssetData& Asset : AllMapAssets)
 	{
 		FString Name = Asset.AssetName.ToString();
@@ -285,7 +291,13 @@ FString FBlueprintMCPServer::HandleSearch(const TMap<FString, FString>& Params)
 		ULevelScriptBlueprint* LevelBP = World->PersistentLevel->GetLevelScriptBlueprint(false);
 		if (!LevelBP) continue;
 
+		int32 BeforeCount = Results.Num();
 		SearchBlueprint(MapAsset.AssetName.ToString(), Path, LevelBP, Results);
+		// Tag newly-added entries as level blueprint results
+		for (int32 i = BeforeCount; i < Results.Num(); ++i)
+		{
+			Results[i]->AsObject()->SetBoolField(TEXT("isLevelBlueprint"), true);
+		}
 	}
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
@@ -417,22 +429,9 @@ FString FBlueprintMCPServer::HandleSearchByType(const TMap<FString, FString>& Pa
 
 	TArray<TSharedPtr<FJsonValue>> Results;
 
-	for (const FAssetData& Asset : AllBlueprintAssets)
+	// Lambda that searches a single Blueprint for type usages
+	auto SearchOneBlueprint = [&](const FString& BPName, const FString& Path, UBlueprint* BP, bool bIsLevel)
 	{
-		if (Results.Num() >= MaxResults) break;
-
-		FString Path = Asset.PackageName.ToString();
-		FString BPName = Asset.AssetName.ToString();
-
-		if (!FilterStr.IsEmpty() && !BPName.Contains(FilterStr, ESearchCase::IgnoreCase) &&
-			!Path.Contains(FilterStr, ESearchCase::IgnoreCase))
-		{
-			continue;
-		}
-
-		UBlueprint* BP = Cast<UBlueprint>(const_cast<FAssetData&>(Asset).GetAsset());
-		if (!BP) continue;
-
 		// Check variables
 		for (const FBPVariableDescription& Var : BP->NewVariables)
 		{
@@ -454,6 +453,8 @@ FString FBlueprintMCPServer::HandleSearchByType(const TMap<FString, FString>& Pa
 				R->SetStringField(TEXT("currentType"), Var.VarType.PinCategory.ToString());
 				if (!VarSubtype.IsEmpty())
 					R->SetStringField(TEXT("currentSubtype"), VarSubtype);
+				if (bIsLevel)
+					R->SetBoolField(TEXT("isLevelBlueprint"), true);
 				Results.Add(MakeShared<FJsonValueObject>(R));
 			}
 		}
@@ -492,6 +493,8 @@ FString FBlueprintMCPServer::HandleSearchByType(const TMap<FString, FString>& Pa
 							R->SetStringField(TEXT("currentType"), PinInfo->PinType.PinCategory.ToString());
 							if (!ParamSubtype.IsEmpty())
 								R->SetStringField(TEXT("currentSubtype"), ParamSubtype);
+							if (bIsLevel)
+								R->SetBoolField(TEXT("isLevelBlueprint"), true);
 							Results.Add(MakeShared<FJsonValueObject>(R));
 						}
 					}
@@ -517,6 +520,8 @@ FString FBlueprintMCPServer::HandleSearchByType(const TMap<FString, FString>& Pa
 							R->SetStringField(TEXT("currentType"), PinInfo->PinType.PinCategory.ToString());
 							if (!ParamSubtype.IsEmpty())
 								R->SetStringField(TEXT("currentSubtype"), ParamSubtype);
+							if (bIsLevel)
+								R->SetBoolField(TEXT("isLevelBlueprint"), true);
 							Results.Add(MakeShared<FJsonValueObject>(R));
 						}
 					}
@@ -533,6 +538,8 @@ FString FBlueprintMCPServer::HandleSearchByType(const TMap<FString, FString>& Pa
 						R->SetStringField(TEXT("location"), Graph->GetName());
 						R->SetStringField(TEXT("nodeId"), Node->NodeGuid.ToString());
 						R->SetStringField(TEXT("structType"), BreakNode->StructType->GetName());
+						if (bIsLevel)
+							R->SetBoolField(TEXT("isLevelBlueprint"), true);
 						Results.Add(MakeShared<FJsonValueObject>(R));
 					}
 				}
@@ -547,6 +554,8 @@ FString FBlueprintMCPServer::HandleSearchByType(const TMap<FString, FString>& Pa
 						R->SetStringField(TEXT("location"), Graph->GetName());
 						R->SetStringField(TEXT("nodeId"), Node->NodeGuid.ToString());
 						R->SetStringField(TEXT("structType"), MakeNode->StructType->GetName());
+						if (bIsLevel)
+							R->SetBoolField(TEXT("isLevelBlueprint"), true);
 						Results.Add(MakeShared<FJsonValueObject>(R));
 					}
 				}
@@ -576,11 +585,55 @@ FString FBlueprintMCPServer::HandleSearchByType(const TMap<FString, FString>& Pa
 						if (!PinSubtype.IsEmpty())
 							R->SetStringField(TEXT("pinSubtype"), PinSubtype);
 						R->SetNumberField(TEXT("connectionCount"), Pin->LinkedTo.Num());
+						if (bIsLevel)
+							R->SetBoolField(TEXT("isLevelBlueprint"), true);
 						Results.Add(MakeShared<FJsonValueObject>(R));
 					}
 				}
 			}
 		}
+	};
+
+	// Search regular blueprints
+	for (const FAssetData& Asset : AllBlueprintAssets)
+	{
+		if (Results.Num() >= MaxResults) break;
+
+		FString Path = Asset.PackageName.ToString();
+		FString BPName = Asset.AssetName.ToString();
+
+		if (!FilterStr.IsEmpty() && !BPName.Contains(FilterStr, ESearchCase::IgnoreCase) &&
+			!Path.Contains(FilterStr, ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+
+		UBlueprint* BP = Cast<UBlueprint>(const_cast<FAssetData&>(Asset).GetAsset());
+		if (!BP) continue;
+
+		SearchOneBlueprint(BPName, Path, BP, false);
+	}
+
+	// Search level blueprints from maps
+	for (FAssetData& MapAsset : AllMapAssets)
+	{
+		if (Results.Num() >= MaxResults) break;
+
+		FString Path = MapAsset.PackageName.ToString();
+		FString MapName = MapAsset.AssetName.ToString();
+
+		if (!FilterStr.IsEmpty() && !MapName.Contains(FilterStr, ESearchCase::IgnoreCase) &&
+			!Path.Contains(FilterStr, ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+
+		UWorld* World = Cast<UWorld>(MapAsset.GetAsset());
+		if (!World || !World->PersistentLevel) continue;
+		ULevelScriptBlueprint* LevelBP = World->PersistentLevel->GetLevelScriptBlueprint(false);
+		if (!LevelBP) continue;
+
+		SearchOneBlueprint(MapName, Path, LevelBP, true);
 	}
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();

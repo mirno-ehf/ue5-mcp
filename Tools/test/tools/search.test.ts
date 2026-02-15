@@ -44,14 +44,31 @@ describe("search_blueprints", () => {
     const data = await ueGet("/api/search", {});
     expect(data.error).toBeDefined();
   });
+
+  it("regular BP search results do not have isLevelBlueprint", async () => {
+    const data = await ueGet("/api/search", {
+      query: "PrintString",
+      path: "/Game/Test",
+    });
+    expect(data.error).toBeUndefined();
+    for (const r of data.results) {
+      expect(r.isLevelBlueprint).toBeUndefined();
+    }
+  });
 });
 
 describe("search_by_type", () => {
-  it("returns type usage results structure", async () => {
-    // Search for a type that likely exists in engine BPs
+  it("returns flat results array with usage field", async () => {
     const data = await ueGet("/api/search-by-type", { typeName: "Vector" });
     expect(data.error).toBeUndefined();
-    // May or may not find results, but the structure should be valid
+    expect(Array.isArray(data.results)).toBe(true);
+    expect(typeof data.resultCount).toBe("number");
+    // If results exist, each should have a usage field
+    for (const r of data.results) {
+      expect(r.usage).toBeDefined();
+      expect(r.blueprint).toBeDefined();
+      expect(r.blueprintPath).toBeDefined();
+    }
   });
 
   it("returns empty for non-existent type", async () => {
@@ -59,5 +76,17 @@ describe("search_by_type", () => {
       typeName: "FNonExistentType_XYZ_999",
     });
     expect(data.error).toBeUndefined();
+    expect(data.resultCount).toBe(0);
+  });
+
+  it("regular BP results do not have isLevelBlueprint", async () => {
+    const data = await ueGet("/api/search-by-type", {
+      typeName: "Vector",
+      filter: "/Game/Test",
+    });
+    expect(data.error).toBeUndefined();
+    for (const r of data.results) {
+      expect(r.isLevelBlueprint).toBeUndefined();
+    }
   });
 });
