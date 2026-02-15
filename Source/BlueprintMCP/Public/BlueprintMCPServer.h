@@ -133,6 +133,9 @@ private:
 	// ----- Reparent -----
 	FString HandleReparentBlueprint(const FString& Body);
 
+	// ----- Create -----
+	FString HandleCreateBlueprint(const FString& Body);
+
 	// ----- Property defaults -----
 	FString HandleSetBlueprintDefault(const FString& Body);
 
