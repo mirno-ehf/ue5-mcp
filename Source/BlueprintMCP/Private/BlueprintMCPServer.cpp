@@ -468,6 +468,14 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("createBlueprint")));
 	Router->BindRoute(FHttpPath(TEXT("/api/create-graph")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("createGraph")));
+	Router->BindRoute(FHttpPath(TEXT("/api/create-struct")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("createStruct")));
+	Router->BindRoute(FHttpPath(TEXT("/api/create-enum")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("createEnum")));
+	Router->BindRoute(FHttpPath(TEXT("/api/add-struct-property")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("addStructProperty")));
+	Router->BindRoute(FHttpPath(TEXT("/api/remove-struct-property")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("removeStructProperty")));
 	Router->BindRoute(FHttpPath(TEXT("/api/delete-graph")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("deleteGraph")));
 	Router->BindRoute(FHttpPath(TEXT("/api/rename-graph")), EHttpServerRequestVerbs::VERB_POST,
@@ -516,6 +524,8 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("findDisconnectedPins")));
 	Router->BindRoute(FHttpPath(TEXT("/api/analyze-rebuild-impact")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("analyzeRebuildImpact")));
+	Router->BindRoute(FHttpPath(TEXT("/api/diff-blueprints")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("diffBlueprints")));
 
 	// Register TMap dispatch handlers
 	RegisterHandlers();
@@ -643,6 +653,10 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("addComponent"),
 		TEXT("removeComponent"),
 		TEXT("restoreGraph"),
+		TEXT("createStruct"),
+		TEXT("createEnum"),
+		TEXT("addStructProperty"),
+		TEXT("removeStructProperty"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -701,6 +715,11 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("restoreGraph"),            [this](const TMap<FString, FString>&, const FString& B) { return HandleRestoreGraph(B); });
 	HandlerMap.Add(TEXT("findDisconnectedPins"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleFindDisconnectedPins(B); });
 	HandlerMap.Add(TEXT("analyzeRebuildImpact"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleAnalyzeRebuildImpact(B); });
+	HandlerMap.Add(TEXT("diffBlueprints"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleDiffBlueprints(B); });
+	HandlerMap.Add(TEXT("createStruct"),            [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateStruct(B); });
+	HandlerMap.Add(TEXT("createEnum"),              [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateEnum(B); });
+	HandlerMap.Add(TEXT("addStructProperty"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleAddStructProperty(B); });
+	HandlerMap.Add(TEXT("removeStructProperty"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleRemoveStructProperty(B); });
 }
 
 // ============================================================
