@@ -1697,6 +1697,114 @@ server.tool(
   }
 );
 
+// --- Graph creation ---
+
+server.tool(
+  "create_graph",
+  "Create a new function graph, macro graph, or custom event in a Blueprint. For function/macro, creates a new named graph with entry/exit nodes. For customEvent, adds a CustomEvent node to the EventGraph.",
+  {
+    blueprint: z.string().describe("Blueprint name or package path"),
+    graphName: z.string().describe("Name for the new graph or custom event"),
+    graphType: z.enum(["function", "macro", "customEvent"]).describe("Type of graph to create: 'function' (new function graph), 'macro' (new macro graph), 'customEvent' (CustomEvent node in EventGraph)"),
+  },
+  async ({ blueprint, graphName, graphType }) => {
+    const err = await ensureUE();
+    if (err) return { content: [{ type: "text" as const, text: err }] };
+
+    const data = await uePost("/api/create-graph", { blueprint, graphName, graphType });
+    if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+    const lines: string[] = [];
+    lines.push(`Graph created successfully.`);
+    lines.push(`Blueprint: ${data.blueprint}`);
+    lines.push(`Graph: ${data.graphName}`);
+    lines.push(`Type: ${data.graphType}`);
+    if (data.nodeId) lines.push(`Node ID: ${data.nodeId}`);
+    if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+    lines.push(``);
+    lines.push(`Next steps:`);
+    if (graphType === "customEvent") {
+      lines.push(`  add_node(blueprint="${blueprint}", graph="EventGraph", ...) — add logic after the event`);
+    } else {
+      lines.push(`  add_node(blueprint="${blueprint}", graph="${graphName}", ...) — add nodes to the new graph`);
+    }
+    lines.push(`  get_blueprint_graph(blueprint="${blueprint}", graph="${graphName}") — inspect the graph`);
+
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  }
+);
+
+// --- Variable management ---
+
+server.tool(
+  "add_variable",
+  `Add a new member variable to a Blueprint. Supports simple types (bool, int, float, string, name, text, byte), built-in structs (vector, rotator, transform), and custom struct/enum types. ${TYPE_NAME_DOCS}`,
+  {
+    blueprint: z.string().describe("Blueprint name or package path"),
+    variableName: z.string().describe("Name for the new variable (e.g. 'Health', 'bIsActive')"),
+    variableType: z.string().describe("Type: 'bool', 'int', 'float', 'string', 'name', 'text', 'byte', 'vector', 'rotator', 'transform', or struct/enum name (e.g. 'FVitals', 'EMyEnum')"),
+    category: z.string().optional().describe("Variable category for organization in the Blueprint editor"),
+    isArray: z.boolean().optional().describe("Create as an array variable (default: false)"),
+    defaultValue: z.string().optional().describe("Default value as a string (e.g. 'true', '42', '0.5')"),
+  },
+  async ({ blueprint, variableName, variableType, category, isArray, defaultValue }) => {
+    const err = await ensureUE();
+    if (err) return { content: [{ type: "text" as const, text: err }] };
+
+    const body: Record<string, any> = { blueprint, variableName, variableType };
+    if (category) body.category = category;
+    if (isArray !== undefined) body.isArray = isArray;
+    if (defaultValue !== undefined) body.defaultValue = defaultValue;
+
+    const data = await uePost("/api/add-variable", body);
+    if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+    const lines: string[] = [];
+    lines.push(`Variable added successfully.`);
+    lines.push(`Blueprint: ${data.blueprint}`);
+    lines.push(`Variable: ${data.variableName}`);
+    lines.push(`Type: ${data.variableType}${data.isArray ? " (Array)" : ""}`);
+    if (data.category) lines.push(`Category: ${data.category}`);
+    if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+    lines.push(``);
+    lines.push(`Next steps:`);
+    lines.push(`  add_node(blueprint="${blueprint}", graph="EventGraph", nodeType="VariableGet", variableName="${variableName}") — read the variable`);
+    lines.push(`  add_node(blueprint="${blueprint}", graph="EventGraph", nodeType="VariableSet", variableName="${variableName}") — write the variable`);
+
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  }
+);
+
+server.tool(
+  "remove_variable",
+  "Remove a member variable from a Blueprint. Also cleans up any VariableGet/VariableSet nodes referencing it.",
+  {
+    blueprint: z.string().describe("Blueprint name or package path"),
+    variableName: z.string().describe("Name of the variable to remove"),
+  },
+  async ({ blueprint, variableName }) => {
+    const err = await ensureUE();
+    if (err) return { content: [{ type: "text" as const, text: err }] };
+
+    const data = await uePost("/api/remove-variable", { blueprint, variableName });
+    if (data.error) {
+      let msg = `Error: ${data.error}`;
+      if (data.availableVariables?.length) {
+        msg += `\nAvailable variables: ${data.availableVariables.join(", ")}`;
+      }
+      return { content: [{ type: "text" as const, text: msg }] };
+    }
+
+    const lines: string[] = [];
+    lines.push(`Variable removed successfully.`);
+    lines.push(`Blueprint: ${data.blueprint}`);
+    lines.push(`Variable: ${data.variableName}`);
+    if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  }
+);
+
 // --- Existing utility tools ---
 
 server.tool(

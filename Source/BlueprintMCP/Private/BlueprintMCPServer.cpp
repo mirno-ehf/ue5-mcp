@@ -447,6 +447,12 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("setBlueprintDefault")));
 	Router->BindRoute(FHttpPath(TEXT("/api/create-blueprint")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("createBlueprint")));
+	Router->BindRoute(FHttpPath(TEXT("/api/create-graph")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("createGraph")));
+	Router->BindRoute(FHttpPath(TEXT("/api/add-variable")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("addVariable")));
+	Router->BindRoute(FHttpPath(TEXT("/api/remove-variable")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("removeVariable")));
 
 	// Snapshot / Safety tools
 	Router->BindRoute(FHttpPath(TEXT("/api/snapshot-graph")), EHttpServerRequestVerbs::VERB_POST,
@@ -613,6 +619,18 @@ bool FBlueprintMCPServer::ProcessOneRequest()
 	else if (Req->Endpoint == TEXT("createBlueprint"))
 	{
 		Response = HandleCreateBlueprint(Req->Body);
+	}
+	else if (Req->Endpoint == TEXT("createGraph"))
+	{
+		Response = HandleCreateGraph(Req->Body);
+	}
+	else if (Req->Endpoint == TEXT("addVariable"))
+	{
+		Response = HandleAddVariable(Req->Body);
+	}
+	else if (Req->Endpoint == TEXT("removeVariable"))
+	{
+		Response = HandleRemoveVariable(Req->Body);
 	}
 	else if (Req->Endpoint == TEXT("snapshotGraph"))
 	{
@@ -6026,5 +6044,462 @@ FString FBlueprintMCPServer::HandleCreateBlueprint(const FString& Body)
 	Result->SetStringField(TEXT("blueprintType"), BlueprintTypeStr.IsEmpty() ? TEXT("Normal") : BlueprintTypeStr);
 	Result->SetBoolField(TEXT("saved"), bSaved);
 	Result->SetArrayField(TEXT("graphs"), GraphNames);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleCreateGraph — create a new function, macro, or custom event graph
+// ============================================================
+
+FString FBlueprintMCPServer::HandleCreateGraph(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString GraphName = Json->GetStringField(TEXT("graphName"));
+	FString GraphType = Json->GetStringField(TEXT("graphType"));
+
+	if (BlueprintName.IsEmpty() || GraphName.IsEmpty() || GraphType.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, graphName, graphType"));
+	}
+
+	if (GraphType != TEXT("function") && GraphType != TEXT("macro") && GraphType != TEXT("customEvent"))
+	{
+		return MakeErrorJson(FString::Printf(
+			TEXT("Invalid graphType '%s'. Valid values: function, macro, customEvent"), *GraphType));
+	}
+
+	// Load Blueprint
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP)
+	{
+		return MakeErrorJson(LoadError);
+	}
+
+	// Check graph name uniqueness
+	TArray<UEdGraph*> AllGraphs;
+	BP->GetAllGraphs(AllGraphs);
+	for (UEdGraph* Existing : AllGraphs)
+	{
+		if (Existing && Existing->GetName().Equals(GraphName, ESearchCase::IgnoreCase))
+		{
+			return MakeErrorJson(FString::Printf(
+				TEXT("A graph named '%s' already exists in Blueprint '%s'"), *GraphName, *BlueprintName));
+		}
+	}
+
+	// Also check for existing custom events with the same name
+	if (GraphType == TEXT("customEvent"))
+	{
+		for (UEdGraph* Graph : AllGraphs)
+		{
+			if (!Graph) continue;
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (UK2Node_CustomEvent* CE = Cast<UK2Node_CustomEvent>(Node))
+				{
+					if (CE->CustomFunctionName == FName(*GraphName))
+					{
+						return MakeErrorJson(FString::Printf(
+							TEXT("A custom event named '%s' already exists in Blueprint '%s'"), *GraphName, *BlueprintName));
+					}
+				}
+			}
+		}
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Creating %s graph '%s' in Blueprint '%s'"),
+		*GraphType, *GraphName, *BlueprintName);
+
+	FString CreatedNodeId;
+
+	if (GraphType == TEXT("function"))
+	{
+		UEdGraph* NewGraph = FBlueprintEditorUtils::CreateNewGraph(BP, FName(*GraphName),
+			UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+		if (!NewGraph)
+		{
+			return MakeErrorJson(TEXT("Failed to create function graph"));
+		}
+		FBlueprintEditorUtils::AddFunctionGraph(BP, NewGraph, /*bIsUserCreated=*/true, /*SignatureFromObject=*/static_cast<UClass*>(nullptr));
+	}
+	else if (GraphType == TEXT("macro"))
+	{
+		UEdGraph* NewGraph = FBlueprintEditorUtils::CreateNewGraph(BP, FName(*GraphName),
+			UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+		if (!NewGraph)
+		{
+			return MakeErrorJson(TEXT("Failed to create macro graph"));
+		}
+		FBlueprintEditorUtils::AddMacroGraph(BP, NewGraph, /*bIsUserCreated=*/true, /*SignatureFromClass=*/nullptr);
+	}
+	else // customEvent
+	{
+		// Find the EventGraph (first UbergraphPage)
+		UEdGraph* EventGraph = nullptr;
+		if (BP->UbergraphPages.Num() > 0)
+		{
+			EventGraph = BP->UbergraphPages[0];
+		}
+		if (!EventGraph)
+		{
+			return MakeErrorJson(TEXT("Blueprint has no EventGraph to add a custom event to"));
+		}
+
+		// Create a custom event node in the EventGraph
+		UK2Node_CustomEvent* NewEvent = NewObject<UK2Node_CustomEvent>(EventGraph);
+		NewEvent->CustomFunctionName = FName(*GraphName);
+		NewEvent->bIsEditable = true;
+		EventGraph->AddNode(NewEvent, /*bFromUI=*/false, /*bSelectNewNode=*/false);
+		NewEvent->CreateNewGuid();
+		NewEvent->PostPlacedNewNode();
+		NewEvent->AllocateDefaultPins();
+		CreatedNodeId = NewEvent->NodeGuid.ToString();
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	bool bSaved = SaveBlueprintPackage(BP);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Created %s graph '%s' in '%s' (saved: %s)"),
+		*GraphType, *GraphName, *BlueprintName, bSaved ? TEXT("true") : TEXT("false"));
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("graphName"), GraphName);
+	Result->SetStringField(TEXT("graphType"), GraphType);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	if (!CreatedNodeId.IsEmpty())
+	{
+		Result->SetStringField(TEXT("nodeId"), CreatedNodeId);
+	}
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleAddVariable — add a new member variable to a Blueprint
+// ============================================================
+
+FString FBlueprintMCPServer::HandleAddVariable(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString VariableName = Json->GetStringField(TEXT("variableName"));
+	FString VariableType = Json->GetStringField(TEXT("variableType"));
+
+	if (BlueprintName.IsEmpty() || VariableName.IsEmpty() || VariableType.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, variableName, variableType"));
+	}
+
+	FString Category;
+	if (Json->HasField(TEXT("category")))
+	{
+		Category = Json->GetStringField(TEXT("category"));
+	}
+
+	bool bIsArray = false;
+	if (Json->HasField(TEXT("isArray")))
+	{
+		bIsArray = Json->GetBoolField(TEXT("isArray"));
+	}
+
+	FString DefaultValue;
+	if (Json->HasField(TEXT("defaultValue")))
+	{
+		DefaultValue = Json->GetStringField(TEXT("defaultValue"));
+	}
+
+	// Load Blueprint
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP)
+	{
+		return MakeErrorJson(LoadError);
+	}
+
+	// Check for duplicate variable name
+	FName VarFName(*VariableName);
+	for (const FBPVariableDescription& Var : BP->NewVariables)
+	{
+		if (Var.VarName == VarFName)
+		{
+			return MakeErrorJson(FString::Printf(
+				TEXT("Variable '%s' already exists in Blueprint '%s'"), *VariableName, *BlueprintName));
+		}
+	}
+
+	// Build FEdGraphPinType based on variableType
+	FEdGraphPinType PinType;
+	FString TypeLower = VariableType.ToLower();
+
+	if (TypeLower == TEXT("bool") || TypeLower == TEXT("boolean"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
+	}
+	else if (TypeLower == TEXT("int") || TypeLower == TEXT("int32") || TypeLower == TEXT("integer"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Int;
+	}
+	else if (TypeLower == TEXT("int64"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Int64;
+	}
+	else if (TypeLower == TEXT("float") || TypeLower == TEXT("double") || TypeLower == TEXT("real"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Real;
+		PinType.PinSubCategory = TEXT("double");
+	}
+	else if (TypeLower == TEXT("string"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_String;
+	}
+	else if (TypeLower == TEXT("name"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Name;
+	}
+	else if (TypeLower == TEXT("text"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Text;
+	}
+	else if (TypeLower == TEXT("byte"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Byte;
+	}
+	else if (TypeLower == TEXT("vector") || TypeLower == TEXT("fvector"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		PinType.PinSubCategoryObject = TBaseStructure<FVector>::Get();
+	}
+	else if (TypeLower == TEXT("rotator") || TypeLower == TEXT("frotator"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		PinType.PinSubCategoryObject = TBaseStructure<FRotator>::Get();
+	}
+	else if (TypeLower == TEXT("transform") || TypeLower == TEXT("ftransform"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		PinType.PinSubCategoryObject = TBaseStructure<FTransform>::Get();
+	}
+	else if (TypeLower == TEXT("linearcolor") || TypeLower == TEXT("flinearcolor"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		PinType.PinSubCategoryObject = TBaseStructure<FLinearColor>::Get();
+	}
+	else if (TypeLower == TEXT("vector2d") || TypeLower == TEXT("fvector2d"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		PinType.PinSubCategoryObject = TBaseStructure<FVector2D>::Get();
+	}
+	else if (TypeLower == TEXT("object"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Object;
+		PinType.PinSubCategoryObject = UObject::StaticClass();
+	}
+	else
+	{
+		// Try as a struct (F-prefix or raw name)
+		FString InternalName = VariableType;
+		bool bTriedAsStruct = false;
+
+		if (VariableType.StartsWith(TEXT("F")) || VariableType.StartsWith(TEXT("S_")) || (!VariableType.StartsWith(TEXT("E"))))
+		{
+			if (VariableType.StartsWith(TEXT("F")))
+			{
+				InternalName = VariableType.Mid(1);
+			}
+
+			UScriptStruct* FoundStruct = FindFirstObject<UScriptStruct>(*InternalName);
+			if (!FoundStruct)
+			{
+				for (TObjectIterator<UScriptStruct> It; It; ++It)
+				{
+					if (It->GetName() == InternalName || It->GetName() == VariableType)
+					{
+						FoundStruct = *It;
+						break;
+					}
+				}
+			}
+
+			if (FoundStruct)
+			{
+				PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+				PinType.PinSubCategoryObject = FoundStruct;
+				bTriedAsStruct = true;
+			}
+		}
+
+		if (!bTriedAsStruct)
+		{
+			// Try as an enum (E-prefix or raw name)
+			FString EnumInternalName = VariableType;
+			if (VariableType.StartsWith(TEXT("E")))
+			{
+				EnumInternalName = VariableType.Mid(1);
+			}
+
+			UEnum* FoundEnum = FindFirstObject<UEnum>(*EnumInternalName);
+			if (!FoundEnum)
+			{
+				for (TObjectIterator<UEnum> It; It; ++It)
+				{
+					if (It->GetName() == EnumInternalName || It->GetName() == VariableType)
+					{
+						FoundEnum = *It;
+						break;
+					}
+				}
+			}
+
+			if (FoundEnum)
+			{
+				if (FoundEnum->GetCppForm() == UEnum::ECppForm::EnumClass)
+				{
+					PinType.PinCategory = UEdGraphSchema_K2::PC_Enum;
+				}
+				else
+				{
+					PinType.PinCategory = UEdGraphSchema_K2::PC_Byte;
+				}
+				PinType.PinSubCategoryObject = FoundEnum;
+			}
+			else
+			{
+				return MakeErrorJson(FString::Printf(
+					TEXT("Unknown variable type '%s'. Use: bool, int, float, string, name, text, byte, vector, rotator, transform, or a struct/enum name (e.g. FVector, EMyEnum)"),
+					*VariableType));
+			}
+		}
+	}
+
+	// Set container type for arrays
+	if (bIsArray)
+	{
+		PinType.ContainerType = EPinContainerType::Array;
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Adding variable '%s' (type=%s, array=%s) to Blueprint '%s'"),
+		*VariableName, *VariableType, bIsArray ? TEXT("true") : TEXT("false"), *BlueprintName);
+
+	// Add the variable using the editor utility function
+	bool bSuccess = FBlueprintEditorUtils::AddMemberVariable(BP, VarFName, PinType, DefaultValue);
+	if (!bSuccess)
+	{
+		return MakeErrorJson(FString::Printf(
+			TEXT("FBlueprintEditorUtils::AddMemberVariable failed for '%s'"), *VariableName));
+	}
+
+	// Set category if provided
+	if (!Category.IsEmpty())
+	{
+		FBlueprintEditorUtils::SetBlueprintVariableCategory(BP, VarFName, nullptr, FText::FromString(Category));
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	bool bSaved = SaveBlueprintPackage(BP);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Added variable '%s' to '%s' (saved: %s)"),
+		*VariableName, *BlueprintName, bSaved ? TEXT("true") : TEXT("false"));
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("variableName"), VariableName);
+	Result->SetStringField(TEXT("variableType"), VariableType);
+	if (!Category.IsEmpty())
+	{
+		Result->SetStringField(TEXT("category"), Category);
+	}
+	Result->SetBoolField(TEXT("isArray"), bIsArray);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleRemoveVariable — remove a member variable from a Blueprint
+// ============================================================
+
+FString FBlueprintMCPServer::HandleRemoveVariable(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString VariableName = Json->GetStringField(TEXT("variableName"));
+
+	if (BlueprintName.IsEmpty() || VariableName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, variableName"));
+	}
+
+	// Load Blueprint
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP)
+	{
+		return MakeErrorJson(LoadError);
+	}
+
+	// Find variable by name (case-insensitive)
+	FName VarFName(*VariableName);
+	bool bVarFound = false;
+	for (const FBPVariableDescription& Var : BP->NewVariables)
+	{
+		if (Var.VarName.ToString().Equals(VariableName, ESearchCase::IgnoreCase))
+		{
+			VarFName = Var.VarName; // Use the exact name found
+			bVarFound = true;
+			break;
+		}
+	}
+
+	if (!bVarFound)
+	{
+		// Build available variables list for helpful error message
+		TArray<TSharedPtr<FJsonValue>> AvailVars;
+		for (const FBPVariableDescription& Var : BP->NewVariables)
+		{
+			AvailVars.Add(MakeShared<FJsonValueString>(Var.VarName.ToString()));
+		}
+
+		TSharedRef<FJsonObject> ErrorResult = MakeShared<FJsonObject>();
+		ErrorResult->SetStringField(TEXT("error"), FString::Printf(
+			TEXT("Variable '%s' not found in Blueprint '%s'"), *VariableName, *BlueprintName));
+		ErrorResult->SetArrayField(TEXT("availableVariables"), AvailVars);
+		return JsonToString(ErrorResult);
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Removing variable '%s' from Blueprint '%s'"),
+		*VariableName, *BlueprintName);
+
+	// Use the editor utility to remove the variable (also cleans up Get/Set nodes)
+	FBlueprintEditorUtils::RemoveMemberVariable(BP, VarFName);
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	bool bSaved = SaveBlueprintPackage(BP);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Removed variable '%s' from '%s' (saved: %s)"),
+		*VariableName, *BlueprintName, bSaved ? TEXT("true") : TEXT("false"));
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("variableName"), VariableName);
+	Result->SetBoolField(TEXT("saved"), bSaved);
 	return JsonToString(Result);
 }

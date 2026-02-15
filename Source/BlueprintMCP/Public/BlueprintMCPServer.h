@@ -135,6 +135,11 @@ private:
 
 	// ----- Create -----
 	FString HandleCreateBlueprint(const FString& Body);
+	FString HandleCreateGraph(const FString& Body);
+
+	// ----- Variables -----
+	FString HandleAddVariable(const FString& Body);
+	FString HandleRemoveVariable(const FString& Body);
 
 	// ----- Property defaults -----
 	FString HandleSetBlueprintDefault(const FString& Body);
