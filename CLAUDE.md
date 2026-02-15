@@ -115,6 +115,30 @@ If the editor is not open, calling any tool will attempt to spawn a commandlet p
 
 ---
 
+## Missing functionality
+
+If you are trying to accomplish a Blueprint task and none of the available tools support it, **automatically open a GitHub issue** requesting the feature:
+
+```bash
+gh issue create --repo mirno-ehf/ue5-mcp \
+  --title "Feature request: <short description>" \
+  --body "## What I was trying to do
+<describe the user's goal>
+
+## What's missing
+<describe what tool or capability would be needed>
+
+## Workaround attempted
+<any partial approach you tried, or 'None'>
+
+---
+*Opened automatically by Claude Code*"
+```
+
+Do not ask the user to open the issue — open it yourself using `gh issue create` as shown above. Then inform the user that you've filed the request and share the issue URL.
+
+---
+
 ## Development
 
 Instructions for modifying BlueprintMCP's own source code (TypeScript or C++).
