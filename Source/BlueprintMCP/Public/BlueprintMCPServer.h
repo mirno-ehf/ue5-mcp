@@ -84,6 +84,10 @@ public:
 	int32 GetMapCount() const { return AllMapAssets.Num(); }
 
 private:
+	// ----- TMap-based request dispatch -----
+	using FRequestHandler = TFunction<FString(const TMap<FString, FString>&, const FString&)>;
+	TMap<FString, FRequestHandler> HandlerMap;
+	void RegisterHandlers();
 	// ----- Queued request model -----
 	struct FPendingRequest
 	{
