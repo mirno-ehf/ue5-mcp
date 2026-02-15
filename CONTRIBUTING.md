@@ -26,11 +26,11 @@ issues:
   trigger: missing or insufficient BlueprintMCP capability
   action: gh issue create --repo mirno-ehf/ue5-mcp
   scope: capability gap only, not the user's higher-level goal
-  do_not: ask the user to file it — file it yourself
   template: see CLAUDE.md "Missing functionality" section
+  notes: file it yourself — never ask the user to do it
 
 pull_requests:
   branch: main
   authorship: AI-only, no human code
-  patterns: see CLAUDE.md "Development" section
+  notes: see CLAUDE.md "Development" section for patterns
 ```
