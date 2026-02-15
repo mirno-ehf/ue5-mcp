@@ -472,6 +472,14 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/add-function-parameter")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("addFunctionParameter")));
 
+	// Component tools
+	Router->BindRoute(FHttpPath(TEXT("/api/add-component")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("addComponent")));
+	Router->BindRoute(FHttpPath(TEXT("/api/remove-component")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("removeComponent")));
+	Router->BindRoute(FHttpPath(TEXT("/api/list-components")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("listComponents")));
+
 	// Snapshot / Safety tools
 	Router->BindRoute(FHttpPath(TEXT("/api/snapshot-graph")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("snapshotGraph")));
@@ -600,6 +608,9 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("addEventDispatcher"),      [this](const TMap<FString, FString>&, const FString& B) { return HandleAddEventDispatcher(B); });
 	HandlerMap.Add(TEXT("listEventDispatchers"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleListEventDispatchers(B); });
 	HandlerMap.Add(TEXT("addFunctionParameter"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleAddFunctionParameter(B); });
+	HandlerMap.Add(TEXT("addComponent"),            [this](const TMap<FString, FString>&, const FString& B) { return HandleAddComponent(B); });
+	HandlerMap.Add(TEXT("removeComponent"),         [this](const TMap<FString, FString>&, const FString& B) { return HandleRemoveComponent(B); });
+	HandlerMap.Add(TEXT("listComponents"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleListComponents(B); });
 	HandlerMap.Add(TEXT("snapshotGraph"),           [this](const TMap<FString, FString>&, const FString& B) { return HandleSnapshotGraph(B); });
 	HandlerMap.Add(TEXT("diffGraph"),               [this](const TMap<FString, FString>&, const FString& B) { return HandleDiffGraph(B); });
 	HandlerMap.Add(TEXT("restoreGraph"),            [this](const TMap<FString, FString>&, const FString& B) { return HandleRestoreGraph(B); });

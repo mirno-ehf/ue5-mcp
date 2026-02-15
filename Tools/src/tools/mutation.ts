@@ -347,20 +347,28 @@ export function registerMutationTools(server: McpServer): void {
 
   server.tool(
     "add_node",
-    "Add a new node to a Blueprint graph. Supports: BreakStruct, MakeStruct, CallFunction, VariableGet, VariableSet, DynamicCast, OverrideEvent, CallParentFunction.",
+    "Add a new node to a Blueprint graph. Supports: BreakStruct, MakeStruct, CallFunction, VariableGet, VariableSet, DynamicCast, OverrideEvent, CallParentFunction, Branch, Sequence, CustomEvent, ForEachLoop, ForLoop, ForLoopWithBreak, WhileLoop, SpawnActorFromClass, Select. For Delay/IsValid/PrintString, use CallFunction with className 'KismetSystemLibrary'.",
     {
       blueprint: z.string().describe("Blueprint name or package path"),
       graph: z.string().describe("Graph name (e.g. 'EventGraph')"),
-      nodeType: z.enum(["BreakStruct", "MakeStruct", "CallFunction", "VariableGet", "VariableSet", "DynamicCast", "OverrideEvent", "CallParentFunction"]).describe("Type of node to add"),
+      nodeType: z.enum([
+        "BreakStruct", "MakeStruct", "CallFunction", "VariableGet", "VariableSet",
+        "DynamicCast", "OverrideEvent", "CallParentFunction",
+        "Branch", "Sequence", "CustomEvent",
+        "ForEachLoop", "ForLoop", "ForLoopWithBreak", "WhileLoop",
+        "SpawnActorFromClass", "Select"
+      ]).describe("Type of node to add"),
       typeName: z.string().optional().describe("Struct type name for BreakStruct/MakeStruct (e.g. 'FVitals')"),
       functionName: z.string().optional().describe("Function name for CallFunction, OverrideEvent, or CallParentFunction (e.g. 'PrintString')"),
       className: z.string().optional().describe("Class name for CallFunction (e.g. 'KismetSystemLibrary')"),
       variableName: z.string().optional().describe("Variable name for VariableGet/VariableSet"),
       castTarget: z.string().optional().describe("Target class name for DynamicCast (e.g. 'BP_PatientJson')"),
+      eventName: z.string().optional().describe("Event name for CustomEvent (e.g. 'OnDataReady')"),
+      actorClass: z.string().optional().describe("Actor class for SpawnActorFromClass (e.g. 'BP_Patient_Base'). Optional — can also be set via the class pin."),
       posX: z.number().optional().describe("X position in the graph (optional)"),
       posY: z.number().optional().describe("Y position in the graph (optional)"),
     },
-    async ({ blueprint, graph, nodeType, typeName, functionName, className, variableName, castTarget, posX, posY }) => {
+    async ({ blueprint, graph, nodeType, typeName, functionName, className, variableName, castTarget, eventName, actorClass, posX, posY }) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
@@ -370,6 +378,8 @@ export function registerMutationTools(server: McpServer): void {
       if (className) body.className = className;
       if (variableName) body.variableName = variableName;
       if (castTarget) body.castTarget = castTarget;
+      if (eventName) body.eventName = eventName;
+      if (actorClass) body.actorClass = actorClass;
       if (posX !== undefined) body.posX = posX;
       if (posY !== undefined) body.posY = posY;
 
