@@ -135,4 +135,62 @@ export function registerVariableTools(server: McpServer): void {
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
+
+  server.tool(
+    "set_variable_metadata",
+    "Set variable properties beyond type: category, tooltip, replication, exposeOnSpawn, editability, isPrivate. Provide any combination of fields to update.",
+    {
+      blueprint: z.string().describe("Blueprint name or package path"),
+      variable: z.string().describe("Variable name"),
+      category: z.string().optional().describe("Variable category for organization in the editor"),
+      tooltip: z.string().optional().describe("Tooltip text shown in the editor"),
+      replication: z.enum(["none", "replicated", "repNotify"]).optional().describe("Replication mode"),
+      exposeOnSpawn: z.boolean().optional().describe("Whether to expose the variable as a pin on SpawnActor"),
+      editability: z.enum(["editAnywhere", "editDefaultsOnly", "editInstanceOnly", "none"]).optional()
+        .describe("Edit visibility: editAnywhere (CDO + instances), editDefaultsOnly (CDO only), editInstanceOnly (instances only), none"),
+      isPrivate: z.boolean().optional().describe("Mark variable as private (only accessible within this Blueprint)"),
+    },
+    async ({ blueprint, variable, category, tooltip, replication, exposeOnSpawn, editability, isPrivate }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const body: Record<string, any> = { blueprint, variable };
+      if (category !== undefined) body.category = category;
+      if (tooltip !== undefined) body.tooltip = tooltip;
+      if (replication !== undefined) body.replication = replication;
+      if (exposeOnSpawn !== undefined) body.exposeOnSpawn = exposeOnSpawn;
+      if (editability !== undefined) body.editability = editability;
+      if (isPrivate !== undefined) body.isPrivate = isPrivate;
+
+      const data = await uePost("/api/set-variable-metadata", body);
+
+      if (data.error) {
+        let msg = `Error: ${data.error}`;
+        if (data.availableVariables?.length) {
+          msg += `\nAvailable variables: ${data.availableVariables.join(", ")}`;
+        }
+        return { content: [{ type: "text" as const, text: msg }] };
+      }
+
+      const lines: string[] = [];
+      lines.push(`Variable metadata updated successfully.`);
+      lines.push(`Blueprint: ${data.blueprint}`);
+      lines.push(`Variable: ${data.variable}`);
+
+      if (data.changes?.length) {
+        lines.push(`\nChanges:`);
+        for (const c of data.changes) {
+          if (c.oldValue !== undefined) {
+            lines.push(`  ${c.field}: ${c.oldValue} -> ${c.newValue}`);
+          } else {
+            lines.push(`  ${c.field}: ${c.newValue}`);
+          }
+        }
+      }
+
+      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
 }

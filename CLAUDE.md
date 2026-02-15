@@ -149,6 +149,14 @@ Instructions for modifying BlueprintMCP's own source code (TypeScript or C++).
 
 **After ANY change to TypeScript or C++ files, you MUST build and verify before considering the work done.** Do not ask the user to build — run the build commands yourself. For C++ use UnrealBuildTool directly from the command line (see below). For TypeScript use `npm run build`. Wait for the build to succeed and fix any errors before moving on.
 
+**CRITICAL — Sub-agent delegation:** When you use the Task tool to delegate code edits to sub-agents, YOU (the parent) are still responsible for building. Sub-agents cannot run UnrealBuildTool. After ALL sub-agents finish writing code, you MUST:
+1. Run `npm run build` for TypeScript changes
+2. Run UnrealBuildTool for C++ changes
+3. Fix any compile errors yourself
+4. Only THEN report completion to the user
+
+Do NOT say "C++ needs rebuild" or "build on next editor open" — run the build command.
+
 #### TypeScript
 
 ```bash

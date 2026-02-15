@@ -854,6 +854,121 @@ FString FBlueprintMCPServer::HandleSetPinDefault(const FString& Body)
 		return MakeErrorJson(TEXT("Invalid JSON body"));
 	}
 
+	// Check for batch mode
+	const TArray<TSharedPtr<FJsonValue>>* BatchArray = nullptr;
+	if (Json->TryGetArrayField(TEXT("batch"), BatchArray) && BatchArray && BatchArray->Num() > 0)
+	{
+		// Batch mode: process multiple pin default operations
+		TArray<TSharedPtr<FJsonValue>> Results;
+		int32 SuccessCount = 0;
+		TSet<UBlueprint*> ModifiedBlueprints;
+
+		for (const TSharedPtr<FJsonValue>& OpVal : *BatchArray)
+		{
+			TSharedPtr<FJsonObject> OpObj = OpVal->AsObject();
+			if (!OpObj.IsValid())
+			{
+				TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetStringField(TEXT("error"), TEXT("Invalid batch entry"));
+				Results.Add(MakeShared<FJsonValueObject>(Entry));
+				continue;
+			}
+
+			FString OpBlueprint = OpObj->GetStringField(TEXT("blueprint"));
+			FString OpNodeId = OpObj->GetStringField(TEXT("nodeId"));
+			FString OpPinName = OpObj->GetStringField(TEXT("pinName"));
+			FString OpValue = OpObj->GetStringField(TEXT("value"));
+
+			TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetStringField(TEXT("blueprint"), OpBlueprint);
+			Entry->SetStringField(TEXT("nodeId"), OpNodeId);
+			Entry->SetStringField(TEXT("pinName"), OpPinName);
+
+			if (OpBlueprint.IsEmpty() || OpNodeId.IsEmpty() || OpPinName.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("error"), TEXT("Missing required fields: blueprint, nodeId, pinName"));
+				Results.Add(MakeShared<FJsonValueObject>(Entry));
+				continue;
+			}
+
+			FString LoadError;
+			UBlueprint* BP = LoadBlueprintByName(OpBlueprint, LoadError);
+			if (!BP)
+			{
+				Entry->SetStringField(TEXT("error"), LoadError);
+				Results.Add(MakeShared<FJsonValueObject>(Entry));
+				continue;
+			}
+
+			UEdGraph* Graph = nullptr;
+			UEdGraphNode* Node = FindNodeByGuid(BP, OpNodeId, &Graph);
+			if (!Node)
+			{
+				Entry->SetStringField(TEXT("error"), FString::Printf(TEXT("Node '%s' not found"), *OpNodeId));
+				Results.Add(MakeShared<FJsonValueObject>(Entry));
+				continue;
+			}
+
+			UEdGraphPin* Pin = Node->FindPin(FName(*OpPinName));
+			if (!Pin)
+			{
+				Entry->SetStringField(TEXT("error"), FString::Printf(TEXT("Pin '%s' not found on node '%s'"), *OpPinName, *OpNodeId));
+				Results.Add(MakeShared<FJsonValueObject>(Entry));
+				continue;
+			}
+
+			if (Pin->Direction != EGPD_Input)
+			{
+				Entry->SetStringField(TEXT("error"), FString::Printf(TEXT("Pin '%s' is an output pin"), *OpPinName));
+				Results.Add(MakeShared<FJsonValueObject>(Entry));
+				continue;
+			}
+
+			FString OldValue = Pin->DefaultValue;
+
+			const UEdGraphSchema* Schema = Graph->GetSchema();
+			if (Schema)
+			{
+				Schema->TrySetDefaultValue(*Pin, OpValue);
+			}
+			else
+			{
+				Pin->DefaultValue = OpValue;
+			}
+
+			Entry->SetBoolField(TEXT("success"), true);
+			Entry->SetStringField(TEXT("oldValue"), OldValue);
+			Entry->SetStringField(TEXT("newValue"), Pin->DefaultValue);
+			Results.Add(MakeShared<FJsonValueObject>(Entry));
+			SuccessCount++;
+			ModifiedBlueprints.Add(BP);
+		}
+
+		// Save all modified blueprints
+		bool bAllSaved = true;
+		for (UBlueprint* BP : ModifiedBlueprints)
+		{
+			FBlueprintEditorUtils::MarkBlueprintAsModified(BP);
+			FKismetEditorUtilities::CompileBlueprint(BP);
+			if (!SaveBlueprintPackage(BP))
+			{
+				bAllSaved = false;
+			}
+		}
+
+		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Batch SetPinDefault — %d/%d succeeded, save %s"),
+			SuccessCount, BatchArray->Num(), bAllSaved ? TEXT("true") : TEXT("false"));
+
+		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetBoolField(TEXT("success"), true);
+		Result->SetNumberField(TEXT("successCount"), SuccessCount);
+		Result->SetNumberField(TEXT("totalCount"), BatchArray->Num());
+		Result->SetArrayField(TEXT("results"), Results);
+		Result->SetBoolField(TEXT("saved"), bAllSaved);
+		return JsonToString(Result);
+	}
+
+	// Single-pin mode (existing logic)
 	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
 	FString NodeId = Json->GetStringField(TEXT("nodeId"));
 	FString PinName = Json->GetStringField(TEXT("pinName"));
@@ -1705,14 +1820,19 @@ FString FBlueprintMCPServer::HandleAddNode(const FString& Body)
 		}
 
 		UK2Node_SpawnActorFromClass* SpawnNode = NewObject<UK2Node_SpawnActorFromClass>(TargetGraph);
-		if (ActorClass)
-		{
-			SpawnNode->SetNodeClass(ActorClass);
-		}
 		SpawnNode->NodePosX = PosX;
 		SpawnNode->NodePosY = PosY;
 		TargetGraph->AddNode(SpawnNode, false, false);
 		SpawnNode->AllocateDefaultPins();
+		if (ActorClass)
+		{
+			UEdGraphPin* ClassPin = SpawnNode->GetClassPin();
+			if (ClassPin)
+			{
+				ClassPin->DefaultObject = ActorClass;
+				SpawnNode->ReconstructNode();
+			}
+		}
 		NewNode = SpawnNode;
 	}
 	else if (NodeType == TEXT("Select"))
@@ -2029,5 +2149,303 @@ FString FBlueprintMCPServer::HandleSetBlueprintDefault(const FString& Body)
 	Result->SetStringField(TEXT("newValue"), ActualNewValue);
 	Result->SetStringField(TEXT("propertyType"), Prop->GetCPPType());
 	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleMoveNode — reposition one or more nodes in a blueprint graph
+// ============================================================
+
+FString FBlueprintMCPServer::HandleMoveNode(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	if (BlueprintName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required field: blueprint"));
+	}
+
+	// Load Blueprint
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP)
+	{
+		return MakeErrorJson(LoadError);
+	}
+
+	// Check for batch mode
+	const TArray<TSharedPtr<FJsonValue>>* NodesArray = nullptr;
+	bool bBatchMode = Json->TryGetArrayField(TEXT("nodes"), NodesArray) && NodesArray && NodesArray->Num() > 0;
+
+	if (bBatchMode)
+	{
+		TArray<TSharedPtr<FJsonValue>> Results;
+		int32 SuccessCount = 0;
+
+		for (const TSharedPtr<FJsonValue>& NodeVal : *NodesArray)
+		{
+			TSharedPtr<FJsonObject> NodeObj = NodeVal->AsObject();
+			if (!NodeObj.IsValid()) continue;
+
+			FString NodeId = NodeObj->GetStringField(TEXT("nodeId"));
+			int32 X = (int32)NodeObj->GetNumberField(TEXT("x"));
+			int32 Y = (int32)NodeObj->GetNumberField(TEXT("y"));
+
+			TSharedRef<FJsonObject> EntryResult = MakeShared<FJsonObject>();
+			EntryResult->SetStringField(TEXT("nodeId"), NodeId);
+
+			UEdGraphNode* Node = FindNodeByGuid(BP, NodeId);
+			if (!Node)
+			{
+				EntryResult->SetStringField(TEXT("error"), FString::Printf(TEXT("Node '%s' not found"), *NodeId));
+				Results.Add(MakeShared<FJsonValueObject>(EntryResult));
+				continue;
+			}
+
+			int32 OldX = Node->NodePosX;
+			int32 OldY = Node->NodePosY;
+			Node->NodePosX = X;
+			Node->NodePosY = Y;
+			EntryResult->SetBoolField(TEXT("success"), true);
+			EntryResult->SetNumberField(TEXT("oldX"), OldX);
+			EntryResult->SetNumberField(TEXT("oldY"), OldY);
+			EntryResult->SetNumberField(TEXT("newX"), Node->NodePosX);
+			EntryResult->SetNumberField(TEXT("newY"), Node->NodePosY);
+			Results.Add(MakeShared<FJsonValueObject>(EntryResult));
+			SuccessCount++;
+		}
+
+		FBlueprintEditorUtils::MarkBlueprintAsModified(BP);
+		bool bSaved = SaveBlueprintPackage(BP);
+
+		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: MoveNode batch — %d/%d succeeded, save %s"),
+			SuccessCount, NodesArray->Num(), bSaved ? TEXT("true") : TEXT("false"));
+
+		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetBoolField(TEXT("success"), true);
+		Result->SetStringField(TEXT("blueprint"), BlueprintName);
+		Result->SetNumberField(TEXT("movedCount"), SuccessCount);
+		Result->SetNumberField(TEXT("totalRequested"), NodesArray->Num());
+		Result->SetArrayField(TEXT("results"), Results);
+		Result->SetBoolField(TEXT("saved"), bSaved);
+		return JsonToString(Result);
+	}
+
+	// Single node mode
+	FString NodeId = Json->GetStringField(TEXT("nodeId"));
+	if (NodeId.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required field: nodeId (or use 'nodes' array for batch mode)"));
+	}
+
+	if (!Json->HasField(TEXT("x")) || !Json->HasField(TEXT("y")))
+	{
+		return MakeErrorJson(TEXT("Missing required fields: x, y"));
+	}
+
+	int32 X = (int32)Json->GetNumberField(TEXT("x"));
+	int32 Y = (int32)Json->GetNumberField(TEXT("y"));
+
+	UEdGraphNode* Node = FindNodeByGuid(BP, NodeId);
+	if (!Node)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("Node '%s' not found"), *NodeId));
+	}
+
+	int32 OldX = Node->NodePosX;
+	int32 OldY = Node->NodePosY;
+	Node->NodePosX = X;
+	Node->NodePosY = Y;
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: MoveNode '%s' from (%d,%d) to (%d,%d)"),
+		*NodeId, OldX, OldY, X, Y);
+
+	FBlueprintEditorUtils::MarkBlueprintAsModified(BP);
+	bool bSaved = SaveBlueprintPackage(BP);
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("nodeId"), NodeId);
+	Result->SetNumberField(TEXT("oldX"), OldX);
+	Result->SetNumberField(TEXT("oldY"), OldY);
+	Result->SetNumberField(TEXT("newX"), Node->NodePosX);
+	Result->SetNumberField(TEXT("newY"), Node->NodePosY);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleDuplicateNodes — duplicate one or more nodes in a graph
+// ============================================================
+
+FString FBlueprintMCPServer::HandleDuplicateNodes(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString GraphName = Json->GetStringField(TEXT("graph"));
+
+	if (BlueprintName.IsEmpty() || GraphName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, graph"));
+	}
+
+	// Get node IDs
+	const TArray<TSharedPtr<FJsonValue>>* NodeIdsArray = nullptr;
+	if (!Json->TryGetArrayField(TEXT("nodeIds"), NodeIdsArray) || !NodeIdsArray || NodeIdsArray->Num() == 0)
+	{
+		return MakeErrorJson(TEXT("Missing required field: nodeIds (array of node GUIDs)"));
+	}
+
+	int32 OffsetX = 50;
+	int32 OffsetY = 50;
+	if (Json->HasField(TEXT("offsetX")))
+		OffsetX = (int32)Json->GetNumberField(TEXT("offsetX"));
+	if (Json->HasField(TEXT("offsetY")))
+		OffsetY = (int32)Json->GetNumberField(TEXT("offsetY"));
+
+	// Load Blueprint
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP)
+	{
+		return MakeErrorJson(LoadError);
+	}
+
+	// Find the target graph
+	FString DecodedGraphName = UrlDecode(GraphName);
+	UEdGraph* TargetGraph = nullptr;
+	TArray<UEdGraph*> AllGraphs;
+	BP->GetAllGraphs(AllGraphs);
+
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (Graph && Graph->GetName().Equals(DecodedGraphName, ESearchCase::IgnoreCase))
+		{
+			TargetGraph = Graph;
+			break;
+		}
+	}
+
+	if (!TargetGraph)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("Graph '%s' not found"), *DecodedGraphName));
+	}
+
+	// Find all source nodes
+	TArray<UEdGraphNode*> SourceNodes;
+	TArray<FString> NotFound;
+
+	for (const TSharedPtr<FJsonValue>& IdVal : *NodeIdsArray)
+	{
+		FString NodeId = IdVal->AsString();
+		UEdGraphNode* Node = FindNodeByGuid(BP, NodeId);
+		if (Node)
+		{
+			// Verify it's in the target graph
+			if (Node->GetGraph() == TargetGraph)
+			{
+				SourceNodes.Add(Node);
+			}
+			else
+			{
+				NotFound.Add(FString::Printf(TEXT("%s (in different graph)"), *NodeId));
+			}
+		}
+		else
+		{
+			NotFound.Add(NodeId);
+		}
+	}
+
+	if (SourceNodes.Num() == 0)
+	{
+		return MakeErrorJson(TEXT("No valid nodes found to duplicate"));
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Duplicating %d node(s) in graph '%s' of '%s'"),
+		SourceNodes.Num(), *DecodedGraphName, *BlueprintName);
+
+	// Duplicate each node
+	TArray<TSharedPtr<FJsonValue>> DuplicatedNodes;
+	TMap<FGuid, FGuid> OldToNewGuidMap;
+
+	for (UEdGraphNode* SourceNode : SourceNodes)
+	{
+		// Duplicate the node using DuplicateObject
+		UEdGraphNode* NewNode = DuplicateObject<UEdGraphNode>(SourceNode, TargetGraph);
+		if (!NewNode)
+		{
+			TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetStringField(TEXT("sourceNodeId"), SourceNode->NodeGuid.ToString());
+			Entry->SetStringField(TEXT("error"), TEXT("DuplicateObject failed"));
+			DuplicatedNodes.Add(MakeShared<FJsonValueObject>(Entry));
+			continue;
+		}
+
+		// Assign new GUID
+		NewNode->CreateNewGuid();
+		OldToNewGuidMap.Add(SourceNode->NodeGuid, NewNode->NodeGuid);
+
+		// Offset position
+		NewNode->NodePosX += OffsetX;
+		NewNode->NodePosY += OffsetY;
+
+		// Break all connections on the duplicate (they point to old pin instances)
+		for (UEdGraphPin* Pin : NewNode->Pins)
+		{
+			if (Pin)
+			{
+				Pin->LinkedTo.Empty();
+			}
+		}
+
+		// Add to graph
+		TargetGraph->AddNode(NewNode, false, false);
+
+		TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("sourceNodeId"), SourceNode->NodeGuid.ToString());
+		Entry->SetStringField(TEXT("newNodeId"), NewNode->NodeGuid.ToString());
+		Entry->SetNumberField(TEXT("posX"), NewNode->NodePosX);
+		Entry->SetNumberField(TEXT("posY"), NewNode->NodePosY);
+		Entry->SetStringField(TEXT("nodeClass"), NewNode->GetClass()->GetName());
+		Entry->SetStringField(TEXT("nodeTitle"), NewNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+		DuplicatedNodes.Add(MakeShared<FJsonValueObject>(Entry));
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	bool bSaved = SaveBlueprintPackage(BP);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Duplicated %d node(s), save %s"),
+		DuplicatedNodes.Num(), bSaved ? TEXT("true") : TEXT("false"));
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("graph"), DecodedGraphName);
+	Result->SetNumberField(TEXT("duplicatedCount"), DuplicatedNodes.Num());
+	Result->SetArrayField(TEXT("nodes"), DuplicatedNodes);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+
+	if (NotFound.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> NotFoundArr;
+		for (const FString& NF : NotFound)
+		{
+			NotFoundArr.Add(MakeShared<FJsonValueString>(NF));
+		}
+		Result->SetArrayField(TEXT("notFound"), NotFoundArr);
+	}
+
 	return JsonToString(Result);
 }

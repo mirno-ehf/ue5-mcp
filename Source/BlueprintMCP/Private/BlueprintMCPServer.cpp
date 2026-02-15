@@ -425,12 +425,16 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("refreshAllNodes")));
 	Router->BindRoute(FHttpPath(TEXT("/api/set-pin-default")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("setPinDefault")));
+	Router->BindRoute(FHttpPath(TEXT("/api/move-node")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("moveNode")));
 	Router->BindRoute(FHttpPath(TEXT("/api/change-struct-node-type")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("changeStructNodeType")));
 	Router->BindRoute(FHttpPath(TEXT("/api/remove-function-parameter")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("removeFunctionParameter")));
 	Router->BindRoute(FHttpPath(TEXT("/api/delete-node")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("deleteNode")));
+	Router->BindRoute(FHttpPath(TEXT("/api/duplicate-nodes")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("duplicateNodes")));
 	Router->BindRoute(FHttpPath(TEXT("/api/search-by-type")), EHttpServerRequestVerbs::VERB_GET,
 		QueuedHandler(TEXT("searchByType")));
 	Router->BindRoute(FHttpPath(TEXT("/api/validate-blueprint")), EHttpServerRequestVerbs::VERB_POST,
@@ -449,10 +453,16 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("createBlueprint")));
 	Router->BindRoute(FHttpPath(TEXT("/api/create-graph")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("createGraph")));
+	Router->BindRoute(FHttpPath(TEXT("/api/delete-graph")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("deleteGraph")));
+	Router->BindRoute(FHttpPath(TEXT("/api/rename-graph")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("renameGraph")));
 	Router->BindRoute(FHttpPath(TEXT("/api/add-variable")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("addVariable")));
 	Router->BindRoute(FHttpPath(TEXT("/api/remove-variable")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("removeVariable")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-variable-metadata")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setVariableMetadata")));
 
 	// Interface tools
 	Router->BindRoute(FHttpPath(TEXT("/api/add-interface")), EHttpServerRequestVerbs::VERB_POST,
@@ -590,8 +600,10 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("disconnectPin"),           [this](const TMap<FString, FString>&, const FString& B) { return HandleDisconnectPin(B); });
 	HandlerMap.Add(TEXT("refreshAllNodes"),         [this](const TMap<FString, FString>&, const FString& B) { return HandleRefreshAllNodes(B); });
 	HandlerMap.Add(TEXT("setPinDefault"),           [this](const TMap<FString, FString>&, const FString& B) { return HandleSetPinDefault(B); });
+	HandlerMap.Add(TEXT("moveNode"),               [this](const TMap<FString, FString>&, const FString& B) { return HandleMoveNode(B); });
 	HandlerMap.Add(TEXT("changeStructNodeType"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleChangeStructNodeType(B); });
 	HandlerMap.Add(TEXT("deleteNode"),              [this](const TMap<FString, FString>&, const FString& B) { return HandleDeleteNode(B); });
+	HandlerMap.Add(TEXT("duplicateNodes"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleDuplicateNodes(B); });
 	HandlerMap.Add(TEXT("validateBlueprint"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleValidateBlueprint(B); });
 	HandlerMap.Add(TEXT("validateAllBlueprints"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleValidateAllBlueprints(B); });
 	HandlerMap.Add(TEXT("addNode"),                 [this](const TMap<FString, FString>&, const FString& B) { return HandleAddNode(B); });
@@ -600,8 +612,11 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("setBlueprintDefault"),     [this](const TMap<FString, FString>&, const FString& B) { return HandleSetBlueprintDefault(B); });
 	HandlerMap.Add(TEXT("createBlueprint"),         [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateBlueprint(B); });
 	HandlerMap.Add(TEXT("createGraph"),             [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateGraph(B); });
+	HandlerMap.Add(TEXT("deleteGraph"),             [this](const TMap<FString, FString>&, const FString& B) { return HandleDeleteGraph(B); });
+	HandlerMap.Add(TEXT("renameGraph"),             [this](const TMap<FString, FString>&, const FString& B) { return HandleRenameGraph(B); });
 	HandlerMap.Add(TEXT("addVariable"),             [this](const TMap<FString, FString>&, const FString& B) { return HandleAddVariable(B); });
 	HandlerMap.Add(TEXT("removeVariable"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleRemoveVariable(B); });
+	HandlerMap.Add(TEXT("setVariableMetadata"),     [this](const TMap<FString, FString>&, const FString& B) { return HandleSetVariableMetadata(B); });
 	HandlerMap.Add(TEXT("addInterface"),            [this](const TMap<FString, FString>&, const FString& B) { return HandleAddInterface(B); });
 	HandlerMap.Add(TEXT("removeInterface"),         [this](const TMap<FString, FString>&, const FString& B) { return HandleRemoveInterface(B); });
 	HandlerMap.Add(TEXT("listInterfaces"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleListInterfaces(B); });

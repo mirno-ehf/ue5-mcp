@@ -97,4 +97,60 @@ export function registerGraphTools(server: McpServer): void {
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
+
+  server.tool(
+    "delete_graph",
+    "Delete an entire function or macro graph from a Blueprint. Cannot delete EventGraph (Ubergraph pages). All nodes in the graph are removed. Use get_blueprint to see available graphs first.",
+    {
+      blueprint: z.string().describe("Blueprint name or package path"),
+      graphName: z.string().describe("Name of the function or macro graph to delete"),
+    },
+    async ({ blueprint, graphName }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await uePost("/api/delete-graph", { blueprint, graphName });
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const lines: string[] = [];
+      lines.push(`Graph deleted successfully.`);
+      lines.push(`Blueprint: ${data.blueprint}`);
+      lines.push(`Graph: ${data.graphName}`);
+      lines.push(`Type: ${data.graphType}`);
+      lines.push(`Nodes removed: ${data.nodeCount}`);
+      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  server.tool(
+    "rename_graph",
+    "Rename a function or macro graph in a Blueprint. Cannot rename EventGraph (Ubergraph pages). Updates all internal references.",
+    {
+      blueprint: z.string().describe("Blueprint name or package path"),
+      graphName: z.string().describe("Current name of the function or macro graph"),
+      newName: z.string().describe("New name for the graph"),
+    },
+    async ({ blueprint, graphName, newName }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await uePost("/api/rename-graph", { blueprint, graphName, newName });
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const lines: string[] = [];
+      lines.push(`Graph renamed successfully.`);
+      lines.push(`Blueprint: ${data.blueprint}`);
+      lines.push(`Old name: ${data.oldName}`);
+      lines.push(`New name: ${data.newName}`);
+      lines.push(`Type: ${data.graphType}`);
+      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+      lines.push(``);
+      lines.push(`Next steps:`);
+      lines.push(`  get_blueprint_graph(blueprint="${blueprint}", graph="${data.newName}") — inspect the renamed graph`);
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
 }

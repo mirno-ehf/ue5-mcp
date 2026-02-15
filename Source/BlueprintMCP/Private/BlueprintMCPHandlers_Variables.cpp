@@ -447,3 +447,215 @@ FString FBlueprintMCPServer::HandleRemoveVariable(const FString& Body)
 	Result->SetBoolField(TEXT("saved"), bSaved);
 	return JsonToString(Result);
 }
+
+// ============================================================
+// HandleSetVariableMetadata — set variable properties (category, tooltip, replication, etc.)
+// ============================================================
+
+FString FBlueprintMCPServer::HandleSetVariableMetadata(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString VariableName = Json->GetStringField(TEXT("variable"));
+
+	if (BlueprintName.IsEmpty() || VariableName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, variable"));
+	}
+
+	// Load Blueprint
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP)
+	{
+		return MakeErrorJson(LoadError);
+	}
+
+	// Find the variable
+	FName VarFName(*VariableName);
+	FBPVariableDescription* VarDesc = nullptr;
+	for (FBPVariableDescription& Var : BP->NewVariables)
+	{
+		if (Var.VarName == VarFName)
+		{
+			VarDesc = &Var;
+			break;
+		}
+	}
+
+	if (!VarDesc)
+	{
+		TArray<TSharedPtr<FJsonValue>> AvailableVars;
+		for (const FBPVariableDescription& Var : BP->NewVariables)
+		{
+			AvailableVars.Add(MakeShared<FJsonValueString>(Var.VarName.ToString()));
+		}
+		TSharedRef<FJsonObject> ErrResult = MakeShared<FJsonObject>();
+		ErrResult->SetStringField(TEXT("error"), FString::Printf(
+			TEXT("Variable '%s' not found in Blueprint '%s'"), *VariableName, *BlueprintName));
+		ErrResult->SetArrayField(TEXT("availableVariables"), AvailableVars);
+		return JsonToString(ErrResult);
+	}
+
+	TArray<TSharedPtr<FJsonValue>> Changes;
+
+	// Category
+	if (Json->HasField(TEXT("category")))
+	{
+		FString OldCategory = VarDesc->Category.ToString();
+		FString NewCategory = Json->GetStringField(TEXT("category"));
+		VarDesc->Category = FText::FromString(NewCategory);
+		FBlueprintEditorUtils::SetBlueprintVariableCategory(BP, VarFName, nullptr, FText::FromString(NewCategory));
+
+		TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+		Change->SetStringField(TEXT("field"), TEXT("category"));
+		Change->SetStringField(TEXT("oldValue"), OldCategory);
+		Change->SetStringField(TEXT("newValue"), NewCategory);
+		Changes.Add(MakeShared<FJsonValueObject>(Change));
+	}
+
+	// Tooltip
+	if (Json->HasField(TEXT("tooltip")))
+	{
+		FString OldTooltip;
+		FBlueprintEditorUtils::GetBlueprintVariableMetaData(BP, VarFName, nullptr, TEXT("tooltip"), OldTooltip);
+		FString NewTooltip = Json->GetStringField(TEXT("tooltip"));
+		FBlueprintEditorUtils::SetBlueprintVariableMetaData(BP, VarFName, nullptr, TEXT("tooltip"), NewTooltip);
+
+		TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+		Change->SetStringField(TEXT("field"), TEXT("tooltip"));
+		Change->SetStringField(TEXT("oldValue"), OldTooltip);
+		Change->SetStringField(TEXT("newValue"), NewTooltip);
+		Changes.Add(MakeShared<FJsonValueObject>(Change));
+	}
+
+	// Replication
+	if (Json->HasField(TEXT("replication")))
+	{
+		FString ReplicationStr = Json->GetStringField(TEXT("replication"));
+		uint64 OldFlags = VarDesc->PropertyFlags;
+
+		if (ReplicationStr == TEXT("none"))
+		{
+			VarDesc->PropertyFlags &= ~CPF_Net;
+			VarDesc->PropertyFlags &= ~CPF_RepNotify;
+			VarDesc->RepNotifyFunc = NAME_None;
+		}
+		else if (ReplicationStr == TEXT("replicated"))
+		{
+			VarDesc->PropertyFlags |= CPF_Net;
+			VarDesc->PropertyFlags &= ~CPF_RepNotify;
+			VarDesc->RepNotifyFunc = NAME_None;
+		}
+		else if (ReplicationStr == TEXT("repNotify"))
+		{
+			VarDesc->PropertyFlags |= CPF_Net | CPF_RepNotify;
+			// Auto-generate RepNotify function name
+			VarDesc->RepNotifyFunc = FName(*FString::Printf(TEXT("OnRep_%s"), *VariableName));
+		}
+		else
+		{
+			return MakeErrorJson(FString::Printf(
+				TEXT("Invalid replication value '%s'. Valid: none, replicated, repNotify"), *ReplicationStr));
+		}
+
+		TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+		Change->SetStringField(TEXT("field"), TEXT("replication"));
+		Change->SetStringField(TEXT("newValue"), ReplicationStr);
+		Changes.Add(MakeShared<FJsonValueObject>(Change));
+	}
+
+	// ExposeOnSpawn
+	if (Json->HasField(TEXT("exposeOnSpawn")))
+	{
+		bool bOld = (VarDesc->PropertyFlags & CPF_ExposeOnSpawn) != 0;
+		bool bNew = Json->GetBoolField(TEXT("exposeOnSpawn"));
+		if (bNew)
+			VarDesc->PropertyFlags |= CPF_ExposeOnSpawn;
+		else
+			VarDesc->PropertyFlags &= ~CPF_ExposeOnSpawn;
+
+		TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+		Change->SetStringField(TEXT("field"), TEXT("exposeOnSpawn"));
+		Change->SetStringField(TEXT("oldValue"), bOld ? TEXT("true") : TEXT("false"));
+		Change->SetStringField(TEXT("newValue"), bNew ? TEXT("true") : TEXT("false"));
+		Changes.Add(MakeShared<FJsonValueObject>(Change));
+	}
+
+	// isPrivate
+	if (Json->HasField(TEXT("isPrivate")))
+	{
+		bool bOld = (VarDesc->PropertyFlags & CPF_DisableEditOnInstance) != 0;
+		bool bNew = Json->GetBoolField(TEXT("isPrivate"));
+		// In UE5, "private" for Blueprint variables is represented via metadata
+		FBlueprintEditorUtils::SetBlueprintVariableMetaData(BP, VarFName, nullptr,
+			TEXT("BlueprintPrivate"), bNew ? TEXT("true") : TEXT("false"));
+
+		TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+		Change->SetStringField(TEXT("field"), TEXT("isPrivate"));
+		Change->SetStringField(TEXT("oldValue"), bOld ? TEXT("true") : TEXT("false"));
+		Change->SetStringField(TEXT("newValue"), bNew ? TEXT("true") : TEXT("false"));
+		Changes.Add(MakeShared<FJsonValueObject>(Change));
+	}
+
+	// Editability (EditAnywhere, EditDefaultsOnly, EditInstanceOnly)
+	if (Json->HasField(TEXT("editability")))
+	{
+		FString Editability = Json->GetStringField(TEXT("editability"));
+
+		// Clear all edit flags first
+		VarDesc->PropertyFlags &= ~(CPF_Edit | CPF_DisableEditOnInstance | CPF_DisableEditOnTemplate);
+
+		if (Editability == TEXT("editAnywhere"))
+		{
+			VarDesc->PropertyFlags |= CPF_Edit;
+		}
+		else if (Editability == TEXT("editDefaultsOnly"))
+		{
+			VarDesc->PropertyFlags |= CPF_Edit | CPF_DisableEditOnInstance;
+		}
+		else if (Editability == TEXT("editInstanceOnly"))
+		{
+			VarDesc->PropertyFlags |= CPF_Edit | CPF_DisableEditOnTemplate;
+		}
+		else if (Editability == TEXT("none"))
+		{
+			// All edit flags already cleared
+		}
+		else
+		{
+			return MakeErrorJson(FString::Printf(
+				TEXT("Invalid editability value '%s'. Valid: editAnywhere, editDefaultsOnly, editInstanceOnly, none"),
+				*Editability));
+		}
+
+		TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+		Change->SetStringField(TEXT("field"), TEXT("editability"));
+		Change->SetStringField(TEXT("newValue"), Editability);
+		Changes.Add(MakeShared<FJsonValueObject>(Change));
+	}
+
+	if (Changes.Num() == 0)
+	{
+		return MakeErrorJson(TEXT("No metadata fields specified. Provide at least one of: category, tooltip, replication, exposeOnSpawn, isPrivate, editability"));
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: SetVariableMetadata on '%s.%s' — %d field(s) changed"),
+		*BlueprintName, *VariableName, Changes.Num());
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	bool bSaved = SaveBlueprintPackage(BP);
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("variable"), VariableName);
+	Result->SetArrayField(TEXT("changes"), Changes);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}

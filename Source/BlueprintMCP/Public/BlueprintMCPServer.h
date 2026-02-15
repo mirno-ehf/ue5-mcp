@@ -119,6 +119,7 @@ private:
 	FString HandleRemoveFunctionParameter(const FString& Body);
 	FString HandleDeleteAsset(const FString& Body);
 	FString HandleDeleteNode(const FString& Body);
+	FString HandleDuplicateNodes(const FString& Body);
 	FString HandleAddNode(const FString& Body);
 	FString HandleRenameAsset(const FString& Body);
 
@@ -131,6 +132,7 @@ private:
 	FString HandleDisconnectPin(const FString& Body);
 	FString HandleRefreshAllNodes(const FString& Body);
 	FString HandleSetPinDefault(const FString& Body);
+	FString HandleMoveNode(const FString& Body);
 
 	// ----- Struct node manipulation (write) -----
 	FString HandleChangeStructNodeType(const FString& Body);
@@ -142,9 +144,14 @@ private:
 	FString HandleCreateBlueprint(const FString& Body);
 	FString HandleCreateGraph(const FString& Body);
 
+	// ----- Graph manipulation -----
+	FString HandleDeleteGraph(const FString& Body);
+	FString HandleRenameGraph(const FString& Body);
+
 	// ----- Variables -----
 	FString HandleAddVariable(const FString& Body);
 	FString HandleRemoveVariable(const FString& Body);
+	FString HandleSetVariableMetadata(const FString& Body);
 
 	// ----- Interfaces -----
 	FString HandleAddInterface(const FString& Body);

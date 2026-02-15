@@ -414,3 +414,181 @@ FString FBlueprintMCPServer::HandleCreateGraph(const FString& Body)
 	}
 	return JsonToString(Result);
 }
+
+// ============================================================
+// HandleDeleteGraph — delete a function or macro graph
+// ============================================================
+
+FString FBlueprintMCPServer::HandleDeleteGraph(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid()) return MakeErrorJson(TEXT("Invalid JSON body"));
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString GraphName = Json->GetStringField(TEXT("graphName"));
+
+	if (BlueprintName.IsEmpty() || GraphName.IsEmpty())
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, graphName"));
+
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP) return MakeErrorJson(LoadError);
+
+	// Find the graph
+	UEdGraph* TargetGraph = nullptr;
+	FString GraphType;
+
+	for (UEdGraph* Graph : BP->FunctionGraphs)
+	{
+		if (Graph && Graph->GetName().Equals(GraphName, ESearchCase::IgnoreCase))
+		{
+			TargetGraph = Graph;
+			GraphType = TEXT("function");
+			break;
+		}
+	}
+	if (!TargetGraph)
+	{
+		for (UEdGraph* Graph : BP->MacroGraphs)
+		{
+			if (Graph && Graph->GetName().Equals(GraphName, ESearchCase::IgnoreCase))
+			{
+				TargetGraph = Graph;
+				GraphType = TEXT("macro");
+				break;
+			}
+		}
+	}
+
+	// Check if it's an UbergraphPage (EventGraph) — disallow deletion
+	if (!TargetGraph)
+	{
+		for (UEdGraph* Graph : BP->UbergraphPages)
+		{
+			if (Graph && Graph->GetName().Equals(GraphName, ESearchCase::IgnoreCase))
+			{
+				return MakeErrorJson(FString::Printf(
+					TEXT("Cannot delete UbergraphPage '%s'. EventGraph and other Ubergraph pages cannot be deleted."),
+					*GraphName));
+			}
+		}
+		return MakeErrorJson(FString::Printf(TEXT("Graph '%s' not found in Blueprint '%s'"), *GraphName, *BlueprintName));
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Deleting %s graph '%s' from Blueprint '%s'"),
+		*GraphType, *GraphName, *BlueprintName);
+
+	// Count nodes for reporting
+	int32 NodeCount = TargetGraph->Nodes.Num();
+
+	// Remove the graph
+	FBlueprintEditorUtils::RemoveGraph(BP, TargetGraph, EGraphRemoveFlags::Default);
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	bool bSaved = SaveBlueprintPackage(BP);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Deleted graph '%s' (%d nodes), save %s"),
+		*GraphName, NodeCount, bSaved ? TEXT("true") : TEXT("false"));
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("graphName"), GraphName);
+	Result->SetStringField(TEXT("graphType"), GraphType);
+	Result->SetNumberField(TEXT("nodeCount"), NodeCount);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleRenameGraph — rename a function or macro graph
+// ============================================================
+
+FString FBlueprintMCPServer::HandleRenameGraph(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid()) return MakeErrorJson(TEXT("Invalid JSON body"));
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString GraphName = Json->GetStringField(TEXT("graphName"));
+	FString NewName = Json->GetStringField(TEXT("newName"));
+
+	if (BlueprintName.IsEmpty() || GraphName.IsEmpty() || NewName.IsEmpty())
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, graphName, newName"));
+
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP) return MakeErrorJson(LoadError);
+
+	// Check if it's an UbergraphPage — disallow rename
+	for (UEdGraph* Graph : BP->UbergraphPages)
+	{
+		if (Graph && Graph->GetName().Equals(GraphName, ESearchCase::IgnoreCase))
+		{
+			return MakeErrorJson(FString::Printf(
+				TEXT("Cannot rename UbergraphPage '%s'. EventGraph and other Ubergraph pages cannot be renamed."),
+				*GraphName));
+		}
+	}
+
+	// Find the graph in FunctionGraphs or MacroGraphs
+	UEdGraph* TargetGraph = nullptr;
+	FString GraphType;
+
+	for (UEdGraph* Graph : BP->FunctionGraphs)
+	{
+		if (Graph && Graph->GetName().Equals(GraphName, ESearchCase::IgnoreCase))
+		{
+			TargetGraph = Graph;
+			GraphType = TEXT("function");
+			break;
+		}
+	}
+	if (!TargetGraph)
+	{
+		for (UEdGraph* Graph : BP->MacroGraphs)
+		{
+			if (Graph && Graph->GetName().Equals(GraphName, ESearchCase::IgnoreCase))
+			{
+				TargetGraph = Graph;
+				GraphType = TEXT("macro");
+				break;
+			}
+		}
+	}
+
+	if (!TargetGraph)
+		return MakeErrorJson(FString::Printf(TEXT("Graph '%s' not found in Blueprint '%s'"), *GraphName, *BlueprintName));
+
+	// Check for name collision
+	TArray<UEdGraph*> AllGraphs;
+	BP->GetAllGraphs(AllGraphs);
+	for (UEdGraph* Existing : AllGraphs)
+	{
+		if (Existing && Existing != TargetGraph && Existing->GetName().Equals(NewName, ESearchCase::IgnoreCase))
+		{
+			return MakeErrorJson(FString::Printf(
+				TEXT("A graph named '%s' already exists in Blueprint '%s'"), *NewName, *BlueprintName));
+		}
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Renaming %s graph '%s' to '%s' in Blueprint '%s'"),
+		*GraphType, *GraphName, *NewName, *BlueprintName);
+
+	FBlueprintEditorUtils::RenameGraph(TargetGraph, NewName);
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	bool bSaved = SaveBlueprintPackage(BP);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Renamed graph '%s' to '%s', save %s"),
+		*GraphName, *NewName, bSaved ? TEXT("true") : TEXT("false"));
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("oldName"), GraphName);
+	Result->SetStringField(TEXT("newName"), TargetGraph->GetName());
+	Result->SetStringField(TEXT("graphType"), GraphType);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}

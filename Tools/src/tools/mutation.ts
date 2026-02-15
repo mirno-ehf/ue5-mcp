@@ -445,27 +445,106 @@ export function registerMutationTools(server: McpServer): void {
 
   server.tool(
     "set_pin_default",
-    "Set the default value of an input pin on a Blueprint node. Use this to set literal/constant values on pins that are not connected to other nodes (e.g. setting a String pin's default to 'SetSpeechData').",
+    "Set the default value of an input pin on a Blueprint node. Supports batch mode for setting multiple pins at once. Use this to set literal/constant values on pins that are not connected to other nodes.",
     {
-      blueprint: z.string().describe("Blueprint name or package path"),
-      nodeId: z.string().describe("Node GUID (from get_blueprint_graph)"),
-      pinName: z.string().describe("Pin name (e.g. 'Function', 'Value', 'Index')"),
-      value: z.string().describe("Default value to set on the pin"),
+      blueprint: z.string().optional().describe("Blueprint name or package path (required for single mode)"),
+      nodeId: z.string().optional().describe("Node GUID (required for single mode)"),
+      pinName: z.string().optional().describe("Pin name (required for single mode)"),
+      value: z.string().optional().describe("Default value to set (required for single mode)"),
+      batch: z.array(z.object({
+        blueprint: z.string(),
+        nodeId: z.string(),
+        pinName: z.string(),
+        value: z.string(),
+      })).optional().describe("Batch mode: array of {blueprint, nodeId, pinName, value} objects. When provided, single params are ignored."),
     },
-    async ({ blueprint, nodeId, pinName, value }) => {
+    async ({ blueprint, nodeId, pinName, value, batch }) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
-      const data = await uePost("/api/set-pin-default", { blueprint, nodeId, pinName, value });
+      const body: Record<string, any> = batch
+        ? { batch }
+        : { blueprint, nodeId, pinName, value };
+
+      const data = await uePost("/api/set-pin-default", body);
       if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
 
       const lines: string[] = [];
-      lines.push(`Pin default set successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Node: ${data.nodeId}`);
-      lines.push(`Pin: ${data.pinName}`);
-      lines.push(`Old value: ${data.oldValue || "(empty)"}`);
-      lines.push(`New value: ${data.newValue}`);
+
+      if (data.results) {
+        // Batch response
+        lines.push(`Batch set_pin_default: ${data.successCount}/${data.totalCount} succeeded.`);
+        for (const r of data.results) {
+          if (r.error) {
+            lines.push(`  FAILED ${r.nodeId || "?"}.${r.pinName || "?"}: ${r.error}`);
+          } else {
+            lines.push(`  OK ${r.nodeId}.${r.pinName}: ${r.oldValue || "(empty)"} -> ${r.newValue}`);
+          }
+        }
+        if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+      } else {
+        lines.push(`Pin default set successfully.`);
+        lines.push(`Blueprint: ${data.blueprint}`);
+        lines.push(`Node: ${data.nodeId}`);
+        lines.push(`Pin: ${data.pinName}`);
+        lines.push(`Old value: ${data.oldValue || "(empty)"}`);
+        lines.push(`New value: ${data.newValue}`);
+        if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+      }
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  server.tool(
+    "move_node",
+    "Reposition one or more nodes in a Blueprint graph by setting their X/Y coordinates. Use batch mode with 'nodes' array for multiple moves in one call.",
+    {
+      blueprint: z.string().describe("Blueprint name or package path"),
+      nodeId: z.string().optional().describe("Node GUID (for single-node mode)"),
+      x: z.number().optional().describe("New X position (for single-node mode)"),
+      y: z.number().optional().describe("New Y position (for single-node mode)"),
+      nodes: z.array(z.object({
+        nodeId: z.string(),
+        x: z.number(),
+        y: z.number(),
+      })).optional().describe("Batch mode: array of {nodeId, x, y} objects"),
+    },
+    async ({ blueprint, nodeId, x, y, nodes }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const body: Record<string, any> = { blueprint };
+      if (nodes) {
+        body.nodes = nodes;
+      } else {
+        if (nodeId) body.nodeId = nodeId;
+        if (x !== undefined) body.x = x;
+        if (y !== undefined) body.y = y;
+      }
+
+      const data = await uePost("/api/move-node", body);
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const lines: string[] = [];
+
+      if (data.results) {
+        // Batch response
+        lines.push(`Batch move: ${data.movedCount}/${data.totalRequested} node(s) repositioned.`);
+        lines.push(`Blueprint: ${data.blueprint}`);
+        for (const r of data.results) {
+          if (r.error) {
+            lines.push(`  FAILED ${r.nodeId}: ${r.error}`);
+          } else {
+            lines.push(`  OK ${r.nodeId}: (${r.oldX},${r.oldY}) -> (${r.newX},${r.newY})`);
+          }
+        }
+      } else {
+        lines.push(`Node repositioned successfully.`);
+        lines.push(`Blueprint: ${data.blueprint}`);
+        lines.push(`Node: ${data.nodeId}`);
+        lines.push(`Position: (${data.oldX},${data.oldY}) -> (${data.newX},${data.newY})`);
+      }
       if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
 
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
@@ -494,6 +573,57 @@ export function registerMutationTools(server: McpServer): void {
       lines.push(`Old value: ${data.oldValue || "(empty)"}`);
       lines.push(`New value: ${data.newValue}`);
       if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  server.tool(
+    "duplicate_nodes",
+    "Duplicate one or more nodes within a Blueprint graph. Creates copies at an offset from the originals. The duplicated nodes are not connected to anything — use connect_pins to wire them up.",
+    {
+      blueprint: z.string().describe("Blueprint name or package path"),
+      graph: z.string().describe("Graph name (e.g. 'EventGraph')"),
+      nodeIds: z.array(z.string()).describe("Array of node GUIDs to duplicate"),
+      offsetX: z.number().optional().describe("X offset for duplicated nodes (default: 50)"),
+      offsetY: z.number().optional().describe("Y offset for duplicated nodes (default: 50)"),
+    },
+    async ({ blueprint, graph, nodeIds, offsetX, offsetY }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const body: Record<string, any> = { blueprint, graph, nodeIds };
+      if (offsetX !== undefined) body.offsetX = offsetX;
+      if (offsetY !== undefined) body.offsetY = offsetY;
+
+      const data = await uePost("/api/duplicate-nodes", body);
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const lines: string[] = [];
+      lines.push(`Duplicated ${data.duplicatedCount} node(s).`);
+      lines.push(`Blueprint: ${data.blueprint}`);
+      lines.push(`Graph: ${data.graph}`);
+
+      if (data.nodes?.length) {
+        lines.push(``);
+        for (const n of data.nodes) {
+          if (n.error) {
+            lines.push(`  FAILED ${n.sourceNodeId}: ${n.error}`);
+          } else {
+            lines.push(`  ${n.sourceNodeId} -> ${n.newNodeId} at (${n.posX},${n.posY})`);
+          }
+        }
+      }
+
+      if (data.notFound?.length) {
+        lines.push(`\nNot found: ${data.notFound.join(", ")}`);
+      }
+
+      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+
+      lines.push(``);
+      lines.push(`Next steps:`);
+      lines.push(`  connect_pins — wire the duplicated nodes to other nodes`);
 
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
