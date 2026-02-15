@@ -87,6 +87,7 @@ private:
 	// ----- TMap-based request dispatch -----
 	using FRequestHandler = TFunction<FString(const TMap<FString, FString>&, const FString&)>;
 	TMap<FString, FRequestHandler> HandlerMap;
+	TSet<FString> MutationEndpoints;
 	void RegisterHandlers();
 	// ----- Queued request model -----
 	struct FPendingRequest

@@ -44,6 +44,7 @@
 #include "Misc/PackageName.h"
 #include "UObject/LinkerLoad.h"
 #include "Engine/UserDefinedEnum.h"
+#include "Editor.h"
 
 // ============================================================
 // Helpers
@@ -565,7 +566,19 @@ bool FBlueprintMCPServer::ProcessOneRequest()
 	FString Response;
 	if (FRequestHandler* Handler = HandlerMap.Find(Req->Endpoint))
 	{
+		// Wrap mutation endpoints in an undo transaction so users can Ctrl+Z
+		const bool bIsMutation = MutationEndpoints.Contains(Req->Endpoint);
+		if (bIsMutation && GEditor)
+		{
+			GEditor->BeginTransaction(FText::FromString(FString::Printf(TEXT("BlueprintMCP: %s"), *Req->Endpoint)));
+		}
+
 		Response = (*Handler)(Req->QueryParams, Req->Body);
+
+		if (bIsMutation && GEditor)
+		{
+			GEditor->EndTransaction();
+		}
 	}
 	else
 	{
@@ -582,6 +595,41 @@ bool FBlueprintMCPServer::ProcessOneRequest()
 
 void FBlueprintMCPServer::RegisterHandlers()
 {
+	// Mutation endpoints — wrapped in undo transactions by ProcessOneRequest()
+	MutationEndpoints = {
+		TEXT("replaceFunctionCalls"),
+		TEXT("changeVariableType"),
+		TEXT("changeFunctionParamType"),
+		TEXT("removeFunctionParameter"),
+		TEXT("deleteAsset"),
+		TEXT("connectPins"),
+		TEXT("disconnectPin"),
+		TEXT("refreshAllNodes"),
+		TEXT("setPinDefault"),
+		TEXT("moveNode"),
+		TEXT("changeStructNodeType"),
+		TEXT("deleteNode"),
+		TEXT("duplicateNodes"),
+		TEXT("addNode"),
+		TEXT("renameAsset"),
+		TEXT("reparentBlueprint"),
+		TEXT("setBlueprintDefault"),
+		TEXT("createBlueprint"),
+		TEXT("createGraph"),
+		TEXT("deleteGraph"),
+		TEXT("renameGraph"),
+		TEXT("addVariable"),
+		TEXT("removeVariable"),
+		TEXT("setVariableMetadata"),
+		TEXT("addInterface"),
+		TEXT("removeInterface"),
+		TEXT("addEventDispatcher"),
+		TEXT("addFunctionParameter"),
+		TEXT("addComponent"),
+		TEXT("removeComponent"),
+		TEXT("restoreGraph"),
+	};
+
 	// GET handlers (use QueryParams, ignore Body)
 	HandlerMap.Add(TEXT("blueprint"),         [this](const TMap<FString, FString>& P, const FString&) { return HandleGetBlueprint(P); });
 	HandlerMap.Add(TEXT("graph"),             [this](const TMap<FString, FString>& P, const FString&) { return HandleGetGraph(P); });
