@@ -156,6 +156,12 @@ private:
 	FString HandleCreateBlueprint(const FString& Body);
 	FString HandleCreateGraph(const FString& Body);
 
+	// ----- User-defined types -----
+	FString HandleCreateStruct(const FString& Body);
+	FString HandleCreateEnum(const FString& Body);
+	FString HandleAddStructProperty(const FString& Body);
+	FString HandleRemoveStructProperty(const FString& Body);
+
 	// ----- Graph manipulation -----
 	FString HandleDeleteGraph(const FString& Body);
 	FString HandleRenameGraph(const FString& Body);
@@ -194,6 +200,9 @@ private:
 	FString HandleRestoreGraph(const FString& Body);
 	FString HandleFindDisconnectedPins(const FString& Body);
 	FString HandleAnalyzeRebuildImpact(const FString& Body);
+
+	// ----- Cross-Blueprint comparison (read-only) -----
+	FString HandleDiffBlueprints(const FString& Body);
 
 	// ----- Serialization -----
 	TSharedRef<FJsonObject> SerializeBlueprint(UBlueprint* BP);
