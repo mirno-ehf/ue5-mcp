@@ -347,7 +347,7 @@ export function registerMutationTools(server: McpServer): void {
 
   server.tool(
     "add_node",
-    "Add a new node to a Blueprint graph. Supports: BreakStruct, MakeStruct, CallFunction, VariableGet, VariableSet, DynamicCast, OverrideEvent, CallParentFunction, Branch, Sequence, CustomEvent, ForEachLoop, ForLoop, ForLoopWithBreak, WhileLoop, SpawnActorFromClass, Select. For Delay/IsValid/PrintString, use CallFunction with className 'KismetSystemLibrary'.",
+    "Add a new node to a Blueprint graph. Supports: BreakStruct, MakeStruct, CallFunction, VariableGet, VariableSet, DynamicCast, OverrideEvent, CallParentFunction, Branch, Sequence, CustomEvent, ForEachLoop, ForLoop, ForLoopWithBreak, WhileLoop, SpawnActorFromClass, Select, Comment, Reroute. For Delay/IsValid/PrintString, use CallFunction with className 'KismetSystemLibrary'.",
     {
       blueprint: z.string().describe("Blueprint name or package path"),
       graph: z.string().describe("Graph name (e.g. 'EventGraph')"),
@@ -356,7 +356,7 @@ export function registerMutationTools(server: McpServer): void {
         "DynamicCast", "OverrideEvent", "CallParentFunction",
         "Branch", "Sequence", "CustomEvent",
         "ForEachLoop", "ForLoop", "ForLoopWithBreak", "WhileLoop",
-        "SpawnActorFromClass", "Select"
+        "SpawnActorFromClass", "Select", "Comment", "Reroute"
       ]).describe("Type of node to add"),
       typeName: z.string().optional().describe("Struct type name for BreakStruct/MakeStruct (e.g. 'FVitals')"),
       functionName: z.string().optional().describe("Function name for CallFunction, OverrideEvent, or CallParentFunction (e.g. 'PrintString')"),
@@ -365,10 +365,13 @@ export function registerMutationTools(server: McpServer): void {
       castTarget: z.string().optional().describe("Target class name for DynamicCast (e.g. 'BP_PatientJson')"),
       eventName: z.string().optional().describe("Event name for CustomEvent (e.g. 'OnDataReady')"),
       actorClass: z.string().optional().describe("Actor class for SpawnActorFromClass (e.g. 'BP_Patient_Base'). Optional — can also be set via the class pin."),
+      comment: z.string().optional().describe("Comment text for Comment node type"),
+      width: z.number().optional().describe("Width for Comment node (default: 400)"),
+      height: z.number().optional().describe("Height for Comment node (default: 200)"),
       posX: z.number().optional().describe("X position in the graph (optional)"),
       posY: z.number().optional().describe("Y position in the graph (optional)"),
     },
-    async ({ blueprint, graph, nodeType, typeName, functionName, className, variableName, castTarget, eventName, actorClass, posX, posY }) => {
+    async ({ blueprint, graph, nodeType, typeName, functionName, className, variableName, castTarget, eventName, actorClass, comment, width, height, posX, posY }) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
@@ -380,6 +383,9 @@ export function registerMutationTools(server: McpServer): void {
       if (castTarget) body.castTarget = castTarget;
       if (eventName) body.eventName = eventName;
       if (actorClass) body.actorClass = actorClass;
+      if (comment) body.comment = comment;
+      if (width !== undefined) body.width = width;
+      if (height !== undefined) body.height = height;
       if (posX !== undefined) body.posX = posX;
       if (posY !== undefined) body.posY = posY;
 
@@ -624,6 +630,57 @@ export function registerMutationTools(server: McpServer): void {
       lines.push(``);
       lines.push(`Next steps:`);
       lines.push(`  connect_pins — wire the duplicated nodes to other nodes`);
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  server.tool(
+    "get_node_comment",
+    "Read the comment text (comment bubble) on a Blueprint node.",
+    {
+      blueprint: z.string().describe("Blueprint name or package path"),
+      nodeId: z.string().describe("Node GUID"),
+    },
+    async ({ blueprint, nodeId }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await uePost("/api/get-node-comment", { blueprint, nodeId });
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const lines: string[] = [];
+      lines.push(`Blueprint: ${data.blueprint}`);
+      lines.push(`Node: ${data.nodeId}`);
+      lines.push(`Comment: ${data.comment || "(empty)"}`);
+      lines.push(`Comment bubble visible: ${data.commentBubbleVisible}`);
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  server.tool(
+    "set_node_comment",
+    "Set or clear the comment text (comment bubble) on a Blueprint node. When setting a non-empty comment, the comment bubble is automatically made visible and pinned.",
+    {
+      blueprint: z.string().describe("Blueprint name or package path"),
+      nodeId: z.string().describe("Node GUID"),
+      comment: z.string().describe("Comment text to set (empty string to clear)"),
+    },
+    async ({ blueprint, nodeId, comment }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await uePost("/api/set-node-comment", { blueprint, nodeId, comment });
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const lines: string[] = [];
+      lines.push(`Node comment set successfully.`);
+      lines.push(`Blueprint: ${data.blueprint}`);
+      lines.push(`Node: ${data.nodeId}`);
+      lines.push(`Old comment: ${data.oldComment || "(empty)"}`);
+      lines.push(`New comment: ${data.newComment || "(empty)"}`);
+      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
 
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }

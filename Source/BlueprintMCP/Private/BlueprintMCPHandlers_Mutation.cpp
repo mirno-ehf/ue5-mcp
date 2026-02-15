@@ -23,6 +23,8 @@
 #include "K2Node_MacroInstance.h"
 #include "K2Node_SpawnActorFromClass.h"
 #include "K2Node_Select.h"
+#include "K2Node_Knot.h"
+#include "EdGraphNode_Comment.h"
 #include "GameFramework/Actor.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -1844,10 +1846,47 @@ FString FBlueprintMCPServer::HandleAddNode(const FString& Body)
 		SelectNode->AllocateDefaultPins();
 		NewNode = SelectNode;
 	}
+	else if (NodeType == TEXT("Comment"))
+	{
+		FString CommentText = Json->GetStringField(TEXT("comment"));
+		if (CommentText.IsEmpty())
+		{
+			CommentText = TEXT("Comment");
+		}
+		int32 Width = 400;
+		int32 Height = 200;
+		if (Json->HasField(TEXT("width")))
+		{
+			Width = FMath::Max(64, Json->GetIntegerField(TEXT("width")));
+		}
+		if (Json->HasField(TEXT("height")))
+		{
+			Height = FMath::Max(64, Json->GetIntegerField(TEXT("height")));
+		}
+
+		UEdGraphNode_Comment* CommentNode = NewObject<UEdGraphNode_Comment>(TargetGraph);
+		CommentNode->NodeComment = CommentText;
+		CommentNode->NodePosX = PosX;
+		CommentNode->NodePosY = PosY;
+		CommentNode->NodeWidth = Width;
+		CommentNode->NodeHeight = Height;
+		TargetGraph->AddNode(CommentNode, false, false);
+		CommentNode->AllocateDefaultPins();
+		NewNode = CommentNode;
+	}
+	else if (NodeType == TEXT("Reroute"))
+	{
+		UK2Node_Knot* KnotNode = NewObject<UK2Node_Knot>(TargetGraph);
+		KnotNode->NodePosX = PosX;
+		KnotNode->NodePosY = PosY;
+		TargetGraph->AddNode(KnotNode, false, false);
+		KnotNode->AllocateDefaultPins();
+		NewNode = KnotNode;
+	}
 	else
 	{
 		return MakeErrorJson(FString::Printf(
-			TEXT("Unsupported nodeType '%s'. Supported: BreakStruct, MakeStruct, CallFunction, VariableGet, VariableSet, DynamicCast, OverrideEvent, CallParentFunction, Branch, Sequence, CustomEvent, ForEachLoop, ForLoop, ForLoopWithBreak, WhileLoop, SpawnActorFromClass, Select"),
+			TEXT("Unsupported nodeType '%s'. Supported: BreakStruct, MakeStruct, CallFunction, VariableGet, VariableSet, DynamicCast, OverrideEvent, CallParentFunction, Branch, Sequence, CustomEvent, ForEachLoop, ForLoop, ForLoopWithBreak, WhileLoop, SpawnActorFromClass, Select, Comment, Reroute"),
 			*NodeType));
 	}
 
@@ -2447,5 +2486,113 @@ FString FBlueprintMCPServer::HandleDuplicateNodes(const FString& Body)
 		Result->SetArrayField(TEXT("notFound"), NotFoundArr);
 	}
 
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleGetNodeComment — read a node's comment text
+// ============================================================
+
+FString FBlueprintMCPServer::HandleGetNodeComment(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString NodeId = Json->GetStringField(TEXT("nodeId"));
+
+	if (BlueprintName.IsEmpty() || NodeId.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, nodeId"));
+	}
+
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP)
+	{
+		return MakeErrorJson(LoadError);
+	}
+
+	UEdGraphNode* Node = FindNodeByGuid(BP, NodeId);
+	if (!Node)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("Node '%s' not found"), *NodeId));
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("nodeId"), NodeId);
+	Result->SetStringField(TEXT("comment"), Node->NodeComment);
+	Result->SetBoolField(TEXT("commentBubbleVisible"), Node->bCommentBubbleVisible);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleSetNodeComment — set a node's comment text
+// ============================================================
+
+FString FBlueprintMCPServer::HandleSetNodeComment(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString NodeId = Json->GetStringField(TEXT("nodeId"));
+
+	if (BlueprintName.IsEmpty() || NodeId.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, nodeId"));
+	}
+
+	if (!Json->HasField(TEXT("comment")))
+	{
+		return MakeErrorJson(TEXT("Missing required field: comment"));
+	}
+
+	FString Comment = Json->GetStringField(TEXT("comment"));
+
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP)
+	{
+		return MakeErrorJson(LoadError);
+	}
+
+	UEdGraphNode* Node = FindNodeByGuid(BP, NodeId);
+	if (!Node)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("Node '%s' not found"), *NodeId));
+	}
+
+	FString OldComment = Node->NodeComment;
+	Node->NodeComment = Comment;
+
+	// Make the comment bubble visible if setting a non-empty comment
+	if (!Comment.IsEmpty())
+	{
+		Node->bCommentBubbleVisible = true;
+		Node->bCommentBubblePinned = true;
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsModified(BP);
+	bool bSaved = SaveBlueprintPackage(BP);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Set comment on node '%s' in '%s', save %s"),
+		*NodeId, *BlueprintName, bSaved ? TEXT("succeeded") : TEXT("failed"));
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("nodeId"), NodeId);
+	Result->SetStringField(TEXT("oldComment"), OldComment);
+	Result->SetStringField(TEXT("newComment"), Comment);
+	Result->SetBoolField(TEXT("saved"), bSaved);
 	return JsonToString(Result);
 }

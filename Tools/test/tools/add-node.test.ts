@@ -199,4 +199,45 @@ describe("add_node", () => {
     expect(data.nodeId).toBeDefined();
     expect(data.saved).toBe(true);
   });
+
+  it("adds a Comment node", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "Comment",
+      comment: "Test Section",
+      width: 500,
+      height: 300,
+    });
+    expect(data.error).toBeUndefined();
+    expect(data.success).toBe(true);
+    expect(data.nodeId).toBeDefined();
+    expect(data.saved).toBe(true);
+  });
+
+  it("adds a Comment node with defaults", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "Comment",
+    });
+    expect(data.error).toBeUndefined();
+    expect(data.success).toBe(true);
+    expect(data.nodeId).toBeDefined();
+    expect(data.saved).toBe(true);
+  });
+
+  it("adds a Reroute node", async () => {
+    const data = await uePost("/api/add-node", {
+      blueprint: bpName,
+      graph: "EventGraph",
+      nodeType: "Reroute",
+      posX: 300,
+      posY: 200,
+    });
+    expect(data.error).toBeUndefined();
+    expect(data.success).toBe(true);
+    expect(data.nodeId).toBeDefined();
+    expect(data.saved).toBe(true);
+  });
 });
