@@ -20,19 +20,59 @@ export const state = {
 
 // --- UE5 Process Manager ---
 
+/**
+ * Read the EngineAssociation field from the .uproject file.
+ * Returns a short version string like "5.4" or "5.7", or null.
+ */
+export function readEngineVersion(): string | null {
+  const uproject = findUProject();
+  if (!uproject) return null;
+  try {
+    const data = JSON.parse(fs.readFileSync(uproject, "utf-8"));
+    if (typeof data.EngineAssociation === "string" && data.EngineAssociation) {
+      return data.EngineAssociation;
+    }
+  } catch { /* ignore parse errors */ }
+  return null;
+}
+
 export function findEditorCmd(): string | null {
-  // Check env var first
+  // Priority 1: explicit env var
   if (process.env.UE_EDITOR_CMD && fs.existsSync(process.env.UE_EDITOR_CMD)) {
     return process.env.UE_EDITOR_CMD;
   }
-  // Common install paths
-  const candidates = [
-    "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor-Cmd.exe",
-    "C:\\Program Files (x86)\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor-Cmd.exe",
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
+
+  // Priority 2: auto-detect from .uproject EngineAssociation
+  const engineVersion = readEngineVersion();
+  if (engineVersion) {
+    const versionCandidates = [
+      `C:\\Program Files\\Epic Games\\UE_${engineVersion}\\Engine\\Binaries\\Win64\\UnrealEditor-Cmd.exe`,
+      `C:\\Program Files (x86)\\Epic Games\\UE_${engineVersion}\\Engine\\Binaries\\Win64\\UnrealEditor-Cmd.exe`,
+    ];
+    for (const p of versionCandidates) {
+      if (fs.existsSync(p)) {
+        console.error(`[BlueprintMCP] Auto-detected engine ${engineVersion} from .uproject`);
+        return p;
+      }
+    }
   }
+
+  // Priority 3: scan for any installed UE5 version
+  const epicGamesDir = "C:\\Program Files\\Epic Games";
+  try {
+    const entries = fs.readdirSync(epicGamesDir);
+    for (const entry of entries.sort().reverse()) {
+      if (entry.startsWith("UE_")) {
+        const candidate = path.join(epicGamesDir, entry, "Engine", "Binaries", "Win64", "UnrealEditor-Cmd.exe");
+        if (fs.existsSync(candidate)) {
+          const detectedVersion = entry.replace("UE_", "");
+          console.error(`[BlueprintMCP] Found engine ${detectedVersion} (no match for .uproject version${engineVersion ? ` ${engineVersion}` : ""})`);
+          return candidate;
+        }
+      }
+    }
+  } catch { /* directory may not exist */ }
+
   return null;
 }
 
