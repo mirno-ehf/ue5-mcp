@@ -1174,15 +1174,15 @@ FString FBlueprintMCPServer::HandleChangeStructNodeType(const FString& Body)
 	// Break all existing links before reconstruction
 	Node->BreakAllNodeLinks();
 
-	// Reconstruct to rebuild pins for the new struct type
-	Node->ReconstructNode();
-
 	// Reconnect pins by matching property base names
 	const UEdGraphSchema* Schema = Graph->GetSchema();
 	if (!Schema)
 	{
 		return MakeErrorJson(TEXT("Graph schema not found"));
 	}
+
+	// Reconstruct to rebuild pins for the new struct type (use schema version for MinimalAPI compat)
+	Schema->ReconstructNode(*Node);
 	int32 Reconnected = 0;
 	int32 Failed = 0;
 	TArray<TSharedPtr<FJsonValue>> ReconnectDetails;
@@ -1832,7 +1832,10 @@ FString FBlueprintMCPServer::HandleAddNode(const FString& Body)
 			if (ClassPin)
 			{
 				ClassPin->DefaultObject = ActorClass;
-				SpawnNode->ReconstructNode();
+				if (const UEdGraphSchema* SpawnSchema = TargetGraph->GetSchema())
+				{
+					SpawnSchema->ReconstructNode(*SpawnNode);
+				}
 			}
 		}
 		NewNode = SpawnNode;

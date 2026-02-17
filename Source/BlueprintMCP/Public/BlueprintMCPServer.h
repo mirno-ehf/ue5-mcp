@@ -10,6 +10,10 @@ class UEdGraph;
 class UEdGraphNode;
 class UEdGraphPin;
 class UBlueprint;
+class UMaterial;
+class UMaterialInstanceConstant;
+class UMaterialFunction;
+class UMaterialExpression;
 
 // ----- Snapshot data structures -----
 
@@ -83,6 +87,12 @@ public:
 	/** Number of indexed Map assets. */
 	int32 GetMapCount() const { return AllMapAssets.Num(); }
 
+	/** Number of indexed Material assets. */
+	int32 GetMaterialCount() const { return AllMaterialAssets.Num(); }
+
+	/** Number of indexed Material Instance assets. */
+	int32 GetMaterialInstanceCount() const { return AllMaterialInstanceAssets.Num(); }
+
 private:
 	// ----- TMap-based request dispatch -----
 	using FRequestHandler = TFunction<FString(const TMap<FString, FString>&, const FString&)>;
@@ -101,6 +111,9 @@ private:
 	TQueue<TSharedPtr<FPendingRequest>> RequestQueue;
 	TArray<FAssetData> AllBlueprintAssets;
 	TArray<FAssetData> AllMapAssets;
+	TArray<FAssetData> AllMaterialAssets;
+	TArray<FAssetData> AllMaterialInstanceAssets;
+	TArray<FAssetData> AllMaterialFunctionAssets;
 	int32 Port = 9847;
 	bool bRunning = false;
 	bool bIsEditor = false;
@@ -204,11 +217,46 @@ private:
 	// ----- Cross-Blueprint comparison (read-only) -----
 	FString HandleDiffBlueprints(const FString& Body);
 
+	// ----- Material read-only handlers (Phase 1) -----
+	FString HandleListMaterials(const TMap<FString, FString>& Params);
+	FString HandleGetMaterial(const TMap<FString, FString>& Params);
+	FString HandleGetMaterialGraph(const TMap<FString, FString>& Params);
+	FString HandleDescribeMaterial(const FString& Body);
+	FString HandleSearchMaterials(const TMap<FString, FString>& Params);
+	FString HandleFindMaterialReferences(const FString& Body);
+
+	// ----- Material mutation handlers (Phase 2) -----
+	FString HandleCreateMaterial(const FString& Body);
+	FString HandleSetMaterialProperty(const FString& Body);
+	FString HandleAddMaterialExpression(const FString& Body);
+	FString HandleDeleteMaterialExpression(const FString& Body);
+	FString HandleConnectMaterialPins(const FString& Body);
+	FString HandleDisconnectMaterialPin(const FString& Body);
+	FString HandleSetExpressionValue(const FString& Body);
+	FString HandleMoveMaterialExpression(const FString& Body);
+
+	// ----- Material instance handlers (Phase 3) -----
+	FString HandleCreateMaterialInstance(const FString& Body);
+	FString HandleSetMaterialInstanceParameter(const FString& Body);
+	FString HandleGetMaterialInstanceParameters(const TMap<FString, FString>& Params);
+	FString HandleReparentMaterialInstance(const FString& Body);
+
+	// ----- Material function handlers (Phase 4) -----
+	FString HandleListMaterialFunctions(const TMap<FString, FString>& Params);
+	FString HandleGetMaterialFunction(const TMap<FString, FString>& Params);
+	FString HandleCreateMaterialFunction(const FString& Body);
+
+	// ----- Material snapshot/diff/restore (Phase 5) -----
+	FString HandleSnapshotMaterialGraph(const FString& Body);
+	FString HandleDiffMaterialGraph(const FString& Body);
+	FString HandleRestoreMaterialGraph(const FString& Body);
+
 	// ----- Serialization -----
 	TSharedRef<FJsonObject> SerializeBlueprint(UBlueprint* BP);
 	TSharedPtr<FJsonObject> SerializeGraph(UEdGraph* Graph);
 	TSharedPtr<FJsonObject> SerializeNode(UEdGraphNode* Node);
 	TSharedPtr<FJsonObject> SerializePin(UEdGraphPin* Pin);
+	TSharedPtr<FJsonObject> SerializeMaterialExpression(UMaterialExpression* Expression);
 	FString JsonToString(TSharedRef<FJsonObject> JsonObj);
 
 	// ----- Helpers -----
@@ -221,11 +269,22 @@ private:
 	bool SaveBlueprintPackage(UBlueprint* BP);
 	static FString UrlDecode(const FString& EncodedString);
 
+	// ----- Material helpers -----
+	FAssetData* FindMaterialAsset(const FString& NameOrPath);
+	UMaterial* LoadMaterialByName(const FString& NameOrPath, FString& OutError);
+	FAssetData* FindMaterialInstanceAsset(const FString& NameOrPath);
+	UMaterialInstanceConstant* LoadMaterialInstanceByName(const FString& NameOrPath, FString& OutError);
+	FAssetData* FindMaterialFunctionAsset(const FString& NameOrPath);
+	UMaterialFunction* LoadMaterialFunctionByName(const FString& NameOrPath, FString& OutError);
+	bool SaveMaterialPackage(UMaterial* Material);
+	bool SaveGenericPackage(UObject* Asset);
+
 	// ----- Type resolution -----
 	bool ResolveTypeFromString(const FString& TypeName, FEdGraphPinType& OutPinType, FString& OutError);
 
 	// ----- Snapshot storage -----
 	TMap<FString, FGraphSnapshot> Snapshots;
+	TMap<FString, FGraphSnapshot> MaterialSnapshots;
 	static const int32 MaxSnapshots = 50;
 
 	// Snapshot helpers

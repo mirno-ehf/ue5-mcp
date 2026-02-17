@@ -231,8 +231,14 @@ FString FBlueprintMCPServer::HandleChangeFunctionParamType(const FString& Body)
 	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Changing param '%s' in %s '%s' of '%s' to %s"),
 		*ParamName, *FoundNodeType, *FunctionName, *BlueprintName, *NewTypeName);
 
-	// Reconstruct the node to update output pins with the new type
-	EntryNode->ReconstructNode();
+	// Reconstruct the node to update output pins with the new type (use schema for MinimalAPI compat)
+	if (UEdGraph* OwningGraph = EntryNode->GetGraph())
+	{
+		if (const UEdGraphSchema* Schema = OwningGraph->GetSchema())
+		{
+			Schema->ReconstructNode(*EntryNode);
+		}
+	}
 
 	// Save
 	bool bSaved = SaveBlueprintPackage(BP);
@@ -403,8 +409,14 @@ FString FBlueprintMCPServer::HandleRemoveFunctionParameter(const FString& Body)
 	// Remove the pin
 	EntryNode->UserDefinedPins.RemoveAt(RemovedIndex);
 
-	// Reconstruct the node to update output pins
-	EntryNode->ReconstructNode();
+	// Reconstruct the node to update output pins (use schema for MinimalAPI compat)
+	if (UEdGraph* OwningGraph = EntryNode->GetGraph())
+	{
+		if (const UEdGraphSchema* Schema = OwningGraph->GetSchema())
+		{
+			Schema->ReconstructNode(*EntryNode);
+		}
+	}
 
 	// Save
 	bool bSaved = SaveBlueprintPackage(BP);

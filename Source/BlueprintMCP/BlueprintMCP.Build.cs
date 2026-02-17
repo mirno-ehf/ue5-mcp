@@ -26,7 +26,8 @@ public class BlueprintMCP : ModuleRules
 			"AssetTools",
 			"Kismet",
 			"KismetCompiler",
-			"EditorSubsystem"
+			"EditorSubsystem",
+			"MaterialEditor"
 		});
 	}
 }

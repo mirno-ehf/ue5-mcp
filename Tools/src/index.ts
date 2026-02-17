@@ -17,6 +17,8 @@ import { registerUtilityTools } from "./tools/utility.js";
 import { registerDiscoveryTools } from "./tools/discovery.js";
 import { registerDiffBlueprintsTools } from "./tools/diff-blueprints.js";
 import { registerUserTypeTools } from "./tools/user-types.js";
+import { registerMaterialReadTools } from "./tools/material-read.js";
+import { registerMaterialMutationTools } from "./tools/material-mutation.js";
 
 // Resource registrations
 import { registerBlueprintListResource } from "./resources/blueprint-list.js";
@@ -42,6 +44,8 @@ registerUtilityTools(server);
 registerDiscoveryTools(server);
 registerDiffBlueprintsTools(server);
 registerUserTypeTools(server);
+registerMaterialReadTools(server);
+registerMaterialMutationTools(server);
 
 // Register resources
 registerBlueprintListResource(server);

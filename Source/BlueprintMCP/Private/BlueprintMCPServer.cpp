@@ -45,6 +45,38 @@
 #include "UObject/LinkerLoad.h"
 #include "Engine/UserDefinedEnum.h"
 #include "Editor.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "Materials/MaterialFunction.h"
+#include "Materials/MaterialExpression.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
+#include "Materials/MaterialExpressionTextureObjectParameter.h"
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionStaticSwitchParameter.h"
+#include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionConstant2Vector.h"
+#include "Materials/MaterialExpressionConstant3Vector.h"
+#include "Materials/MaterialExpressionConstant4Vector.h"
+#include "Materials/MaterialExpressionTextureSample.h"
+#include "Materials/MaterialExpressionTextureCoordinate.h"
+#include "Materials/MaterialExpressionComponentMask.h"
+#include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionAppendVector.h"
+#include "Materials/MaterialExpressionAdd.h"
+#include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionLinearInterpolate.h"
+#include "Materials/MaterialExpressionClamp.h"
+#include "Materials/MaterialExpressionOneMinus.h"
+#include "Materials/MaterialExpressionPower.h"
+#include "Materials/MaterialExpressionTime.h"
+#include "Materials/MaterialExpressionWorldPosition.h"
+#include "Materials/MaterialExpressionFunctionInput.h"
+#include "Materials/MaterialExpressionFunctionOutput.h"
+#include "Materials/MaterialExpressionMaterialFunctionCall.h"
+#include "MaterialGraph/MaterialGraph.h"
+#include "MaterialGraph/MaterialGraphNode.h"
+#include "MaterialGraph/MaterialGraphSchema.h"
 
 // ============================================================
 // Helpers
@@ -317,6 +349,18 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	ARM.Get().GetAssetsByClass(UWorld::StaticClass()->GetClassPathName(), AllMapAssets, false);
 	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Found %d Map assets (potential level blueprints)."), AllMapAssets.Num());
 
+	// Scan for Material assets
+	ARM.Get().GetAssetsByClass(UMaterial::StaticClass()->GetClassPathName(), AllMaterialAssets, false);
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Found %d Material assets."), AllMaterialAssets.Num());
+
+	// Scan for Material Instance assets
+	ARM.Get().GetAssetsByClass(UMaterialInstanceConstant::StaticClass()->GetClassPathName(), AllMaterialInstanceAssets, false);
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Found %d Material Instance assets."), AllMaterialInstanceAssets.Num());
+
+	// Scan for Material Function assets
+	ARM.Get().GetAssetsByClass(UMaterialFunction::StaticClass()->GetClassPathName(), AllMaterialFunctionAssets, false);
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Found %d Material Function assets."), AllMaterialFunctionAssets.Num());
+
 	// Start HTTP server
 	FHttpServerModule& HttpModule = FModuleManager::LoadModuleChecked<FHttpServerModule>("HTTPServer");
 	TSharedPtr<IHttpRouter> Router = HttpModule.GetHttpRouter(Port);
@@ -358,6 +402,9 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 				J->SetStringField(TEXT("mode"), bIsEditor ? TEXT("editor") : TEXT("commandlet"));
 				J->SetNumberField(TEXT("blueprintCount"), AllBlueprintAssets.Num());
 				J->SetNumberField(TEXT("mapCount"), AllMapAssets.Num());
+				J->SetNumberField(TEXT("materialCount"), AllMaterialAssets.Num());
+				J->SetNumberField(TEXT("materialInstanceCount"), AllMaterialInstanceAssets.Num());
+				J->SetNumberField(TEXT("materialFunctionCount"), AllMaterialFunctionAssets.Num());
 				TUniquePtr<FHttpServerResponse> R = FHttpServerResponse::Create(
 					JsonToString(J), TEXT("application/json"));
 				OnComplete(MoveTemp(R));
@@ -527,6 +574,80 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/diff-blueprints")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("diffBlueprints")));
 
+	// Material read-only tools (Phase 1)
+	Router->BindRoute(FHttpPath(TEXT("/api/materials")), EHttpServerRequestVerbs::VERB_GET,
+		FHttpRequestHandler::CreateLambda(
+			[this](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
+			{
+				FString Resp = HandleListMaterials(Request.QueryParams);
+				TUniquePtr<FHttpServerResponse> R = FHttpServerResponse::Create(
+					Resp, TEXT("application/json"));
+				OnComplete(MoveTemp(R));
+				return true;
+			}));
+	Router->BindRoute(FHttpPath(TEXT("/api/material")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("getMaterial")));
+	Router->BindRoute(FHttpPath(TEXT("/api/material-graph")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("getMaterialGraph")));
+	Router->BindRoute(FHttpPath(TEXT("/api/describe-material")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("describeMaterial")));
+	Router->BindRoute(FHttpPath(TEXT("/api/search-materials")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("searchMaterials")));
+	Router->BindRoute(FHttpPath(TEXT("/api/material-references")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("findMaterialReferences")));
+
+	// Material mutation tools (Phase 2)
+	Router->BindRoute(FHttpPath(TEXT("/api/create-material")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("createMaterial")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-material-property")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setMaterialProperty")));
+	Router->BindRoute(FHttpPath(TEXT("/api/add-material-expression")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("addMaterialExpression")));
+	Router->BindRoute(FHttpPath(TEXT("/api/delete-material-expression")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("deleteMaterialExpression")));
+	Router->BindRoute(FHttpPath(TEXT("/api/connect-material-pins")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("connectMaterialPins")));
+	Router->BindRoute(FHttpPath(TEXT("/api/disconnect-material-pin")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("disconnectMaterialPin")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-expression-value")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setExpressionValue")));
+	Router->BindRoute(FHttpPath(TEXT("/api/move-material-expression")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("moveMaterialExpression")));
+
+	// Material instance tools (Phase 3)
+	Router->BindRoute(FHttpPath(TEXT("/api/create-material-instance")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("createMaterialInstance")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-material-instance-parameter")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setMaterialInstanceParameter")));
+	Router->BindRoute(FHttpPath(TEXT("/api/material-instance-params")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("getMaterialInstanceParams")));
+	Router->BindRoute(FHttpPath(TEXT("/api/reparent-material-instance")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("reparentMaterialInstance")));
+
+	// Material function tools (Phase 4)
+	Router->BindRoute(FHttpPath(TEXT("/api/material-functions")), EHttpServerRequestVerbs::VERB_GET,
+		FHttpRequestHandler::CreateLambda(
+			[this](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
+			{
+				FString Resp = HandleListMaterialFunctions(Request.QueryParams);
+				TUniquePtr<FHttpServerResponse> R = FHttpServerResponse::Create(
+					Resp, TEXT("application/json"));
+				OnComplete(MoveTemp(R));
+				return true;
+			}));
+	Router->BindRoute(FHttpPath(TEXT("/api/material-function")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("getMaterialFunction")));
+	Router->BindRoute(FHttpPath(TEXT("/api/create-material-function")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("createMaterialFunction")));
+
+	// Material snapshot/diff/restore (Phase 5)
+	Router->BindRoute(FHttpPath(TEXT("/api/snapshot-material-graph")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("snapshotMaterialGraph")));
+	Router->BindRoute(FHttpPath(TEXT("/api/diff-material-graph")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("diffMaterialGraph")));
+	Router->BindRoute(FHttpPath(TEXT("/api/restore-material-graph")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("restoreMaterialGraph")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -657,6 +778,19 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("createEnum"),
 		TEXT("addStructProperty"),
 		TEXT("removeStructProperty"),
+		TEXT("createMaterial"),
+		TEXT("setMaterialProperty"),
+		TEXT("addMaterialExpression"),
+		TEXT("deleteMaterialExpression"),
+		TEXT("connectMaterialPins"),
+		TEXT("disconnectMaterialPin"),
+		TEXT("setExpressionValue"),
+		TEXT("moveMaterialExpression"),
+		TEXT("createMaterialInstance"),
+		TEXT("setMaterialInstanceParameter"),
+		TEXT("reparentMaterialInstance"),
+		TEXT("createMaterialFunction"),
+		TEXT("restoreMaterialGraph"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -720,6 +854,32 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("createEnum"),              [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateEnum(B); });
 	HandlerMap.Add(TEXT("addStructProperty"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleAddStructProperty(B); });
 	HandlerMap.Add(TEXT("removeStructProperty"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleRemoveStructProperty(B); });
+
+	// Material GET handlers
+	HandlerMap.Add(TEXT("getMaterial"),             [this](const TMap<FString, FString>& P, const FString&) { return HandleGetMaterial(P); });
+	HandlerMap.Add(TEXT("getMaterialGraph"),        [this](const TMap<FString, FString>& P, const FString&) { return HandleGetMaterialGraph(P); });
+	HandlerMap.Add(TEXT("searchMaterials"),         [this](const TMap<FString, FString>& P, const FString&) { return HandleSearchMaterials(P); });
+	HandlerMap.Add(TEXT("getMaterialInstanceParams"), [this](const TMap<FString, FString>& P, const FString&) { return HandleGetMaterialInstanceParameters(P); });
+	HandlerMap.Add(TEXT("getMaterialFunction"),     [this](const TMap<FString, FString>& P, const FString&) { return HandleGetMaterialFunction(P); });
+
+	// Material POST handlers
+	HandlerMap.Add(TEXT("describeMaterial"),        [this](const TMap<FString, FString>&, const FString& B) { return HandleDescribeMaterial(B); });
+	HandlerMap.Add(TEXT("findMaterialReferences"),  [this](const TMap<FString, FString>&, const FString& B) { return HandleFindMaterialReferences(B); });
+	HandlerMap.Add(TEXT("createMaterial"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateMaterial(B); });
+	HandlerMap.Add(TEXT("setMaterialProperty"),     [this](const TMap<FString, FString>&, const FString& B) { return HandleSetMaterialProperty(B); });
+	HandlerMap.Add(TEXT("addMaterialExpression"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleAddMaterialExpression(B); });
+	HandlerMap.Add(TEXT("deleteMaterialExpression"),[this](const TMap<FString, FString>&, const FString& B) { return HandleDeleteMaterialExpression(B); });
+	HandlerMap.Add(TEXT("connectMaterialPins"),     [this](const TMap<FString, FString>&, const FString& B) { return HandleConnectMaterialPins(B); });
+	HandlerMap.Add(TEXT("disconnectMaterialPin"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleDisconnectMaterialPin(B); });
+	HandlerMap.Add(TEXT("setExpressionValue"),      [this](const TMap<FString, FString>&, const FString& B) { return HandleSetExpressionValue(B); });
+	HandlerMap.Add(TEXT("moveMaterialExpression"),  [this](const TMap<FString, FString>&, const FString& B) { return HandleMoveMaterialExpression(B); });
+	HandlerMap.Add(TEXT("createMaterialInstance"),  [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateMaterialInstance(B); });
+	HandlerMap.Add(TEXT("setMaterialInstanceParameter"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetMaterialInstanceParameter(B); });
+	HandlerMap.Add(TEXT("reparentMaterialInstance"),[this](const TMap<FString, FString>&, const FString& B) { return HandleReparentMaterialInstance(B); });
+	HandlerMap.Add(TEXT("createMaterialFunction"),  [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateMaterialFunction(B); });
+	HandlerMap.Add(TEXT("snapshotMaterialGraph"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleSnapshotMaterialGraph(B); });
+	HandlerMap.Add(TEXT("diffMaterialGraph"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleDiffMaterialGraph(B); });
+	HandlerMap.Add(TEXT("restoreMaterialGraph"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleRestoreMaterialGraph(B); });
 }
 
 // ============================================================
@@ -937,8 +1097,21 @@ TSharedPtr<FJsonObject> FBlueprintMCPServer::SerializeNode(UEdGraphNode* Node)
 	NJ->SetNumberField(TEXT("posX"), Node->NodePosX);
 	NJ->SetNumberField(TEXT("posY"), Node->NodePosY);
 
+	// Material graph node — extract UMaterialExpression data
+	if (UMaterialGraphNode* MatNode = Cast<UMaterialGraphNode>(Node))
+	{
+		NJ->SetStringField(TEXT("nodeType"), TEXT("MaterialExpression"));
+		if (MatNode->MaterialExpression)
+		{
+			TSharedPtr<FJsonObject> ExprJson = SerializeMaterialExpression(MatNode->MaterialExpression);
+			if (ExprJson.IsValid())
+			{
+				NJ->SetObjectField(TEXT("expression"), ExprJson);
+			}
+		}
+	}
 	// K2Node specifics — check CallParentFunction before CallFunction (inheritance)
-	if (auto* CPF = Cast<UK2Node_CallParentFunction>(Node))
+	else if (auto* CPF = Cast<UK2Node_CallParentFunction>(Node))
 	{
 		NJ->SetStringField(TEXT("functionName"), CPF->FunctionReference.GetMemberName().ToString());
 		if (CPF->FunctionReference.GetMemberParentClass())
@@ -1217,4 +1390,255 @@ bool FBlueprintMCPServer::ResolveTypeFromString(
 	}
 
 	return true;
+}
+
+// ============================================================
+// Material helpers
+// ============================================================
+
+FAssetData* FBlueprintMCPServer::FindMaterialAsset(const FString& NameOrPath)
+{
+	for (FAssetData& Asset : AllMaterialAssets)
+	{
+		if (Asset.AssetName.ToString() == NameOrPath || Asset.PackageName.ToString() == NameOrPath)
+			return &Asset;
+	}
+	for (FAssetData& Asset : AllMaterialAssets)
+	{
+		if (Asset.AssetName.ToString().Equals(NameOrPath, ESearchCase::IgnoreCase) ||
+			Asset.PackageName.ToString().Equals(NameOrPath, ESearchCase::IgnoreCase))
+			return &Asset;
+	}
+	return nullptr;
+}
+
+UMaterial* FBlueprintMCPServer::LoadMaterialByName(const FString& NameOrPath, FString& OutError)
+{
+	FAssetData* Asset = FindMaterialAsset(NameOrPath);
+	if (Asset)
+	{
+		UMaterial* Mat = Cast<UMaterial>(Asset->GetAsset());
+		if (Mat) return Mat;
+	}
+	OutError = FString::Printf(TEXT("Material '%s' not found. Use list_materials to see available assets."), *NameOrPath);
+	return nullptr;
+}
+
+FAssetData* FBlueprintMCPServer::FindMaterialInstanceAsset(const FString& NameOrPath)
+{
+	for (FAssetData& Asset : AllMaterialInstanceAssets)
+	{
+		if (Asset.AssetName.ToString() == NameOrPath || Asset.PackageName.ToString() == NameOrPath)
+			return &Asset;
+	}
+	for (FAssetData& Asset : AllMaterialInstanceAssets)
+	{
+		if (Asset.AssetName.ToString().Equals(NameOrPath, ESearchCase::IgnoreCase) ||
+			Asset.PackageName.ToString().Equals(NameOrPath, ESearchCase::IgnoreCase))
+			return &Asset;
+	}
+	return nullptr;
+}
+
+UMaterialInstanceConstant* FBlueprintMCPServer::LoadMaterialInstanceByName(const FString& NameOrPath, FString& OutError)
+{
+	FAssetData* Asset = FindMaterialInstanceAsset(NameOrPath);
+	if (Asset)
+	{
+		UMaterialInstanceConstant* MI = Cast<UMaterialInstanceConstant>(Asset->GetAsset());
+		if (MI) return MI;
+	}
+	OutError = FString::Printf(TEXT("Material Instance '%s' not found. Use list_materials to see available assets."), *NameOrPath);
+	return nullptr;
+}
+
+FAssetData* FBlueprintMCPServer::FindMaterialFunctionAsset(const FString& NameOrPath)
+{
+	for (FAssetData& Asset : AllMaterialFunctionAssets)
+	{
+		if (Asset.AssetName.ToString() == NameOrPath || Asset.PackageName.ToString() == NameOrPath)
+			return &Asset;
+	}
+	for (FAssetData& Asset : AllMaterialFunctionAssets)
+	{
+		if (Asset.AssetName.ToString().Equals(NameOrPath, ESearchCase::IgnoreCase) ||
+			Asset.PackageName.ToString().Equals(NameOrPath, ESearchCase::IgnoreCase))
+			return &Asset;
+	}
+	return nullptr;
+}
+
+UMaterialFunction* FBlueprintMCPServer::LoadMaterialFunctionByName(const FString& NameOrPath, FString& OutError)
+{
+	FAssetData* Asset = FindMaterialFunctionAsset(NameOrPath);
+	if (Asset)
+	{
+		UMaterialFunction* MF = Cast<UMaterialFunction>(Asset->GetAsset());
+		if (MF) return MF;
+	}
+	OutError = FString::Printf(TEXT("Material Function '%s' not found. Use list_material_functions to see available assets."), *NameOrPath);
+	return nullptr;
+}
+
+bool FBlueprintMCPServer::SaveMaterialPackage(UMaterial* Material)
+{
+	if (!Material) return false;
+	return SaveGenericPackage(Material);
+}
+
+bool FBlueprintMCPServer::SaveGenericPackage(UObject* Asset)
+{
+	if (!Asset) return false;
+	UPackage* Package = Asset->GetPackage();
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: SaveGenericPackage — begin for '%s'"), *Asset->GetName());
+
+	FString PackageFilename = FPackageName::LongPackageNameToFilename(
+		Package->GetName(), FPackageName::GetAssetPackageExtension());
+	PackageFilename = FPaths::ConvertRelativePathToFull(PackageFilename);
+
+	if (FPlatformFileManager::Get().GetPlatformFile().IsReadOnly(*PackageFilename))
+	{
+		FPlatformFileManager::Get().GetPlatformFile().SetReadOnly(*PackageFilename, false);
+	}
+
+	FSavePackageArgs SaveArgs;
+	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+	SaveArgs.SaveFlags = SAVE_NoError;
+
+	ESavePackageResult SaveResult = ESavePackageResult::Error;
+#if PLATFORM_WINDOWS
+	int32 SEHCode = TrySavePackageSEH(Package, Asset, *PackageFilename, &SaveArgs, &SaveResult);
+	if (SEHCode != 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("BlueprintMCP: SaveGenericPackage CRASHED (SEH exception)"));
+	}
+#else
+	FSavePackageResultStruct Result = UPackage::Save(Package, Asset, *PackageFilename, SaveArgs);
+	SaveResult = Result.Result;
+#endif
+
+	bool bSuccess = (SaveResult == ESavePackageResult::Success);
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: SaveGenericPackage — %s for '%s'"),
+		bSuccess ? TEXT("SUCCEEDED") : TEXT("FAILED"), *Asset->GetName());
+	return bSuccess;
+}
+
+TSharedPtr<FJsonObject> FBlueprintMCPServer::SerializeMaterialExpression(UMaterialExpression* Expression)
+{
+	if (!Expression) return nullptr;
+
+	TSharedRef<FJsonObject> EJ = MakeShared<FJsonObject>();
+	EJ->SetStringField(TEXT("class"), Expression->GetClass()->GetName());
+	EJ->SetStringField(TEXT("name"), Expression->GetName());
+	EJ->SetStringField(TEXT("description"), Expression->GetDescription());
+	EJ->SetNumberField(TEXT("posX"), Expression->MaterialExpressionEditorX);
+	EJ->SetNumberField(TEXT("posY"), Expression->MaterialExpressionEditorY);
+
+	if (auto* SP = Cast<UMaterialExpressionScalarParameter>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("ScalarParameter"));
+		EJ->SetStringField(TEXT("parameterName"), SP->ParameterName.ToString());
+		EJ->SetNumberField(TEXT("defaultValue"), SP->DefaultValue);
+		EJ->SetStringField(TEXT("group"), SP->Group.ToString());
+	}
+	else if (auto* VP = Cast<UMaterialExpressionVectorParameter>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("VectorParameter"));
+		EJ->SetStringField(TEXT("parameterName"), VP->ParameterName.ToString());
+		TSharedRef<FJsonObject> DefVal = MakeShared<FJsonObject>();
+		DefVal->SetNumberField(TEXT("r"), VP->DefaultValue.R);
+		DefVal->SetNumberField(TEXT("g"), VP->DefaultValue.G);
+		DefVal->SetNumberField(TEXT("b"), VP->DefaultValue.B);
+		DefVal->SetNumberField(TEXT("a"), VP->DefaultValue.A);
+		EJ->SetObjectField(TEXT("defaultValue"), DefVal);
+		EJ->SetStringField(TEXT("group"), VP->Group.ToString());
+	}
+	else if (auto* TP = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("TextureSampleParameter2D"));
+		EJ->SetStringField(TEXT("parameterName"), TP->ParameterName.ToString());
+		if (TP->Texture)
+			EJ->SetStringField(TEXT("texture"), TP->Texture->GetPathName());
+		EJ->SetStringField(TEXT("group"), TP->Group.ToString());
+	}
+	else if (auto* SSP = Cast<UMaterialExpressionStaticSwitchParameter>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("StaticSwitchParameter"));
+		EJ->SetStringField(TEXT("parameterName"), SSP->ParameterName.ToString());
+		EJ->SetBoolField(TEXT("defaultValue"), SSP->DefaultValue);
+		EJ->SetStringField(TEXT("group"), SSP->Group.ToString());
+	}
+	else if (auto* SC = Cast<UMaterialExpressionConstant>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("Constant"));
+		EJ->SetNumberField(TEXT("value"), SC->R);
+	}
+	else if (auto* C3 = Cast<UMaterialExpressionConstant3Vector>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("Constant3Vector"));
+		TSharedRef<FJsonObject> Val = MakeShared<FJsonObject>();
+		Val->SetNumberField(TEXT("r"), C3->Constant.R);
+		Val->SetNumberField(TEXT("g"), C3->Constant.G);
+		Val->SetNumberField(TEXT("b"), C3->Constant.B);
+		EJ->SetObjectField(TEXT("value"), Val);
+	}
+	else if (auto* C4 = Cast<UMaterialExpressionConstant4Vector>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("Constant4Vector"));
+		TSharedRef<FJsonObject> Val = MakeShared<FJsonObject>();
+		Val->SetNumberField(TEXT("r"), C4->Constant.R);
+		Val->SetNumberField(TEXT("g"), C4->Constant.G);
+		Val->SetNumberField(TEXT("b"), C4->Constant.B);
+		Val->SetNumberField(TEXT("a"), C4->Constant.A);
+		EJ->SetObjectField(TEXT("value"), Val);
+	}
+	else if (auto* TS = Cast<UMaterialExpressionTextureSample>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("TextureSample"));
+		if (TS->Texture)
+			EJ->SetStringField(TEXT("texture"), TS->Texture->GetPathName());
+	}
+	else if (auto* TC = Cast<UMaterialExpressionTextureCoordinate>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("TextureCoordinate"));
+		EJ->SetNumberField(TEXT("coordinateIndex"), TC->CoordinateIndex);
+		EJ->SetNumberField(TEXT("uTiling"), TC->UTiling);
+		EJ->SetNumberField(TEXT("vTiling"), TC->VTiling);
+	}
+	else if (auto* CM = Cast<UMaterialExpressionComponentMask>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("ComponentMask"));
+		EJ->SetBoolField(TEXT("r"), CM->R != 0);
+		EJ->SetBoolField(TEXT("g"), CM->G != 0);
+		EJ->SetBoolField(TEXT("b"), CM->B != 0);
+		EJ->SetBoolField(TEXT("a"), CM->A != 0);
+	}
+	else if (auto* Custom = Cast<UMaterialExpressionCustom>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("Custom"));
+		EJ->SetStringField(TEXT("code"), Custom->Code);
+		EJ->SetStringField(TEXT("outputType"), StaticEnum<ECustomMaterialOutputType>()->GetNameStringByValue((int64)Custom->OutputType));
+	}
+	else if (auto* FI = Cast<UMaterialExpressionFunctionInput>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("FunctionInput"));
+		EJ->SetStringField(TEXT("inputName"), FI->InputName.ToString());
+	}
+	else if (auto* FO = Cast<UMaterialExpressionFunctionOutput>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("FunctionOutput"));
+		EJ->SetStringField(TEXT("outputName"), FO->OutputName.ToString());
+	}
+	else if (auto* MFC = Cast<UMaterialExpressionMaterialFunctionCall>(Expression))
+	{
+		EJ->SetStringField(TEXT("expressionType"), TEXT("MaterialFunctionCall"));
+		if (MFC->MaterialFunction)
+			EJ->SetStringField(TEXT("functionName"), MFC->MaterialFunction->GetName());
+	}
+	else
+	{
+		EJ->SetStringField(TEXT("expressionType"), Expression->GetClass()->GetName());
+	}
+
+	return EJ;
 }

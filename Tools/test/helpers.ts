@@ -74,3 +74,45 @@ export async function deleteTestBlueprint(
     force: true,
   });
 }
+
+/**
+ * Create a test Material via the HTTP API.
+ */
+export async function createTestMaterial(opts: {
+  name: string;
+  packagePath?: string;
+  domain?: string;
+  blendMode?: string;
+}): Promise<any> {
+  return uePost("/api/create-material", {
+    name: opts.name,
+    packagePath: opts.packagePath ?? "/Game/Test",
+    domain: opts.domain ?? "Surface",
+    blendMode: opts.blendMode ?? "Opaque",
+  });
+}
+
+/**
+ * Delete a test Material via the HTTP API.
+ */
+export async function deleteTestMaterial(assetPath: string): Promise<any> {
+  return uePost("/api/delete-asset", {
+    assetPath,
+    force: true,
+  });
+}
+
+/**
+ * Create a test Material Instance via the HTTP API.
+ */
+export async function createTestMaterialInstance(opts: {
+  name: string;
+  packagePath?: string;
+  parentMaterial: string;
+}): Promise<any> {
+  return uePost("/api/create-material-instance", {
+    name: opts.name,
+    packagePath: opts.packagePath ?? "/Game/Test",
+    parentMaterial: opts.parentMaterial,
+  });
+}
