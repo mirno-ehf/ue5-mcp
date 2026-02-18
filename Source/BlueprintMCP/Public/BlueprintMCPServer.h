@@ -251,6 +251,18 @@ private:
 	FString HandleDiffMaterialGraph(const FString& Body);
 	FString HandleRestoreMaterialGraph(const FString& Body);
 
+	// ----- Animation Blueprint handlers -----
+	FString HandleCreateAnimBlueprint(const FString& Body);
+	FString HandleAddAnimState(const FString& Body);
+	FString HandleRemoveAnimState(const FString& Body);
+	FString HandleAddAnimTransition(const FString& Body);
+	FString HandleSetTransitionRule(const FString& Body);
+	FString HandleAddAnimNode(const FString& Body);
+	FString HandleAddStateMachine(const FString& Body);
+	FString HandleSetStateAnimation(const FString& Body);
+	FString HandleListAnimSlots(const FString& Body);
+	FString HandleListSyncGroups(const FString& Body);
+
 	// ----- Serialization -----
 	TSharedRef<FJsonObject> SerializeBlueprint(UBlueprint* BP);
 	TSharedPtr<FJsonObject> SerializeGraph(UEdGraph* Graph);

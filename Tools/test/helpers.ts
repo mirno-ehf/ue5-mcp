@@ -116,3 +116,21 @@ export async function createTestMaterialInstance(opts: {
     parentMaterial: opts.parentMaterial,
   });
 }
+
+
+/**
+ * Create a test Animation Blueprint via the HTTP API.
+ */
+export async function createTestAnimBlueprint(opts: {
+  name: string;
+  packagePath?: string;
+  skeleton?: string;
+  parentClass?: string;
+}): Promise<any> {
+  return uePost("/api/create-anim-blueprint", {
+    name: opts.name,
+    packagePath: opts.packagePath ?? "/Game/Test",
+    skeleton: opts.skeleton ?? "__create_test_skeleton__",
+    parentClass: opts.parentClass ?? "AnimInstance",
+  });
+}

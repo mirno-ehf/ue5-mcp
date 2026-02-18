@@ -158,6 +158,49 @@ export function describeGraph(graphData: any): string {
   const nodes: any[] = graphData.nodes || [];
   lines.push(`# ${graphData.name} (${nodes.length} nodes)`);
 
+  // State machine description mode
+  if (graphData.graphType === "StateMachine") {
+    if (graphData.entryState) {
+      lines.push(`Entry → ${graphData.entryState}`);
+    }
+    lines.push("");
+
+    // Collect states and transitions
+    const states = nodes.filter((n: any) => n.nodeType === "AnimState");
+    const transitions = nodes.filter((n: any) => n.nodeType === "AnimTransition");
+
+    if (states.length > 0) {
+      lines.push("States:");
+      for (const s of states) {
+        const animInfo = s.animationAsset ? ` [AnimSequence: ${s.animationAsset}]` :
+                         s.blendSpaceAsset ? ` [BlendSpace: ${s.blendSpaceAsset}]` : "";
+        lines.push(`  ${s.stateName || s.title}${animInfo}`);
+      }
+    }
+
+    if (transitions.length > 0) {
+      lines.push("");
+      lines.push("Transitions:");
+      for (const t of transitions) {
+        const from = t.fromState || "?";
+        const to = t.toState || "?";
+        const dur = t.crossfadeDuration !== undefined ? `${t.crossfadeDuration}s` : "?";
+        const pri = t.priorityOrder !== undefined ? `priority ${t.priorityOrder}` : "";
+        const bidir = t.bBidirectional ? ", bidirectional" : "";
+        lines.push(`  ${from} → ${to} (${dur}${pri ? `, ${pri}` : ""}${bidir})`);
+      }
+    }
+
+    return lines.join("\n");
+  }
+
+  // AnimGraph — identify anim node types
+  if (graphData.graphType === "AnimGraph") {
+    lines.push(`(Animation Graph)`);
+  } else if (graphData.graphType === "TransitionRule") {
+    lines.push(`(Transition Rule)`);
+  }
+
   // Build node lookup
   const nodeMap: NodeMap = {};
   for (const n of nodes) {
@@ -213,6 +256,11 @@ export function summarizeBlueprint(data: any): string {
   lines.push(`# ${data.name}`);
   lines.push(`Parent: ${data.parentClass || "?"} | Path: ${data.path}`);
   if (data.blueprintType) lines.push(`Type: ${data.blueprintType}`);
+
+  if (data.isAnimBlueprint) {
+    lines.push(`Animation Blueprint: yes`);
+    if (data.targetSkeleton) lines.push(`Target Skeleton: ${data.targetSkeleton}`);
+  }
 
   if (data.interfaces?.length) {
     lines.push(`\n## Interfaces (${data.interfaces.length})`);
@@ -284,7 +332,8 @@ export function summarizeBlueprint(data: any): string {
 
       const funcParamStr = funcEntries.length === 1 ? funcEntries[0] : "";
 
-      lines.push(`  ${g.name} (${nodeCount} nodes)${funcParamStr}`);
+      const graphTypeStr = g.graphType ? ` [${g.graphType}]` : "";
+      lines.push(`  ${g.name} (${nodeCount} nodes)${funcParamStr}${graphTypeStr}`);
       if (events.length) lines.push(`    Events: ${events.join(", ")}`);
       if (delegates.length) lines.push(`    Delegates: ${delegates.join(", ")}`);
       if (calls.length) lines.push(`    Calls: ${calls.join(", ")}`);
