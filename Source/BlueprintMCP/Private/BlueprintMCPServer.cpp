@@ -78,6 +78,23 @@
 #include "MaterialGraph/MaterialGraphNode.h"
 #include "MaterialGraph/MaterialGraphSchema.h"
 
+// Animation Blueprint support
+#include "Animation/AnimBlueprint.h"
+#include "Animation/AnimBlueprintGeneratedClass.h"
+#include "Animation/Skeleton.h"
+#include "AnimGraphNode_StateMachine.h"
+#include "AnimGraphNode_AssetPlayerBase.h"
+#include "AnimGraphNode_SequencePlayer.h"
+#include "AnimGraphNode_BlendSpacePlayer.h"
+#include "AnimGraphNode_Base.h"
+#include "AnimStateNode.h"
+#include "AnimStateTransitionNode.h"
+#include "AnimStateConduitNode.h"
+#include "AnimStateEntryNode.h"
+#include "AnimationStateMachineGraph.h"
+#include "AnimationGraph.h"
+#include "AnimationTransitionGraph.h"
+
 // ============================================================
 // Helpers
 // ============================================================
@@ -648,6 +665,28 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/restore-material-graph")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("restoreMaterialGraph")));
 
+	// Animation Blueprint tools
+	Router->BindRoute(FHttpPath(TEXT("/api/create-anim-blueprint")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("createAnimBlueprint")));
+	Router->BindRoute(FHttpPath(TEXT("/api/add-anim-state")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("addAnimState")));
+	Router->BindRoute(FHttpPath(TEXT("/api/remove-anim-state")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("removeAnimState")));
+	Router->BindRoute(FHttpPath(TEXT("/api/add-anim-transition")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("addAnimTransition")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-transition-rule")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setTransitionRule")));
+	Router->BindRoute(FHttpPath(TEXT("/api/add-anim-node")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("addAnimNode")));
+	Router->BindRoute(FHttpPath(TEXT("/api/add-state-machine")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("addStateMachine")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-state-animation")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setStateAnimation")));
+	Router->BindRoute(FHttpPath(TEXT("/api/list-anim-slots")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("listAnimSlots")));
+	Router->BindRoute(FHttpPath(TEXT("/api/list-sync-groups")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("listSyncGroups")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -791,6 +830,14 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("reparentMaterialInstance"),
 		TEXT("createMaterialFunction"),
 		TEXT("restoreMaterialGraph"),
+		TEXT("createAnimBlueprint"),
+		TEXT("addAnimState"),
+		TEXT("removeAnimState"),
+		TEXT("addAnimTransition"),
+		TEXT("setTransitionRule"),
+		TEXT("addAnimNode"),
+		TEXT("addStateMachine"),
+		TEXT("setStateAnimation"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -880,6 +927,18 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("snapshotMaterialGraph"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleSnapshotMaterialGraph(B); });
 	HandlerMap.Add(TEXT("diffMaterialGraph"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleDiffMaterialGraph(B); });
 	HandlerMap.Add(TEXT("restoreMaterialGraph"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleRestoreMaterialGraph(B); });
+
+	// Animation Blueprint handlers
+	HandlerMap.Add(TEXT("createAnimBlueprint"),     [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateAnimBlueprint(B); });
+	HandlerMap.Add(TEXT("addAnimState"),            [this](const TMap<FString, FString>&, const FString& B) { return HandleAddAnimState(B); });
+	HandlerMap.Add(TEXT("removeAnimState"),         [this](const TMap<FString, FString>&, const FString& B) { return HandleRemoveAnimState(B); });
+	HandlerMap.Add(TEXT("addAnimTransition"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleAddAnimTransition(B); });
+	HandlerMap.Add(TEXT("setTransitionRule"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleSetTransitionRule(B); });
+	HandlerMap.Add(TEXT("addAnimNode"),             [this](const TMap<FString, FString>&, const FString& B) { return HandleAddAnimNode(B); });
+	HandlerMap.Add(TEXT("addStateMachine"),         [this](const TMap<FString, FString>&, const FString& B) { return HandleAddStateMachine(B); });
+	HandlerMap.Add(TEXT("setStateAnimation"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleSetStateAnimation(B); });
+	HandlerMap.Add(TEXT("listAnimSlots"),           [this](const TMap<FString, FString>&, const FString& B) { return HandleListAnimSlots(B); });
+	HandlerMap.Add(TEXT("listSyncGroups"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleListSyncGroups(B); });
 }
 
 // ============================================================
@@ -1026,6 +1085,17 @@ TSharedRef<FJsonObject> FBlueprintMCPServer::SerializeBlueprint(UBlueprint* BP)
 	J->SetStringField(TEXT("blueprintType"),
 		StaticEnum<EBlueprintType>()->GetNameStringByValue((int64)BP->BlueprintType));
 
+	// Animation Blueprint detection
+	if (UAnimBlueprint* AnimBP = Cast<UAnimBlueprint>(BP))
+	{
+		J->SetBoolField(TEXT("isAnimBlueprint"), true);
+		if (AnimBP->TargetSkeleton)
+		{
+			J->SetStringField(TEXT("targetSkeleton"), AnimBP->TargetSkeleton->GetName());
+			J->SetStringField(TEXT("targetSkeletonPath"), AnimBP->TargetSkeleton->GetPathName());
+		}
+	}
+
 	// Variables
 	TArray<TSharedPtr<FJsonValue>> Vars;
 	for (const FBPVariableDescription& V : BP->NewVariables)
@@ -1074,6 +1144,39 @@ TSharedPtr<FJsonObject> FBlueprintMCPServer::SerializeGraph(UEdGraph* Graph)
 	GJ->SetStringField(TEXT("name"), Graph->GetName());
 	GJ->SetStringField(TEXT("schema"), Graph->Schema ? Graph->Schema->GetClass()->GetName() : TEXT("Unknown"));
 
+	// Detect animation graph subtypes
+	if (Cast<UAnimationStateMachineGraph>(Graph))
+	{
+		GJ->SetStringField(TEXT("graphType"), TEXT("StateMachine"));
+		// Find entry state by following entry node's output pin
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (UAnimStateEntryNode* EntryNode = Cast<UAnimStateEntryNode>(Node))
+			{
+				for (UEdGraphPin* Pin : EntryNode->Pins)
+				{
+					if (Pin->Direction == EGPD_Output && Pin->LinkedTo.Num() > 0)
+					{
+						UEdGraphNode* LinkedNode = Pin->LinkedTo[0]->GetOwningNode();
+						if (UAnimStateNode* StateNode = Cast<UAnimStateNode>(LinkedNode))
+						{
+							GJ->SetStringField(TEXT("entryState"), StateNode->GetStateName());
+						}
+					}
+				}
+				break;
+			}
+		}
+	}
+	else if (Cast<UAnimationGraph>(Graph))
+	{
+		GJ->SetStringField(TEXT("graphType"), TEXT("AnimGraph"));
+	}
+	else if (Cast<UAnimationTransitionGraph>(Graph))
+	{
+		GJ->SetStringField(TEXT("graphType"), TEXT("TransitionRule"));
+	}
+
 	TArray<TSharedPtr<FJsonValue>> Nodes;
 	for (UEdGraphNode* Node : Graph->Nodes)
 	{
@@ -1109,6 +1212,85 @@ TSharedPtr<FJsonObject> FBlueprintMCPServer::SerializeNode(UEdGraphNode* Node)
 				NJ->SetObjectField(TEXT("expression"), ExprJson);
 			}
 		}
+	}
+	// Animation Blueprint node types
+	else if (auto* SMNode = Cast<UAnimGraphNode_StateMachine>(Node))
+	{
+		NJ->SetStringField(TEXT("nodeType"), TEXT("AnimStateMachine"));
+		if (SMNode->EditorStateMachineGraph)
+		{
+			NJ->SetStringField(TEXT("stateMachineName"), SMNode->EditorStateMachineGraph->GetName());
+			int32 StateCount = 0, TransitionCount = 0;
+			for (UEdGraphNode* SubNode : SMNode->EditorStateMachineGraph->Nodes)
+			{
+				if (Cast<UAnimStateNode>(SubNode)) StateCount++;
+				else if (Cast<UAnimStateTransitionNode>(SubNode)) TransitionCount++;
+			}
+			NJ->SetNumberField(TEXT("stateCount"), StateCount);
+			NJ->SetNumberField(TEXT("transitionCount"), TransitionCount);
+		}
+	}
+	else if (auto* SeqPlayer = Cast<UAnimGraphNode_SequencePlayer>(Node))
+	{
+		NJ->SetStringField(TEXT("nodeType"), TEXT("AnimSequencePlayer"));
+		if (UAnimationAsset* Asset = SeqPlayer->GetAnimationAsset())
+		{
+			NJ->SetStringField(TEXT("animationAsset"), Asset->GetName());
+			NJ->SetStringField(TEXT("animationAssetPath"), Asset->GetPathName());
+		}
+	}
+	else if (auto* BSPlayer = Cast<UAnimGraphNode_BlendSpacePlayer>(Node))
+	{
+		NJ->SetStringField(TEXT("nodeType"), TEXT("AnimBlendSpacePlayer"));
+		if (UAnimationAsset* Asset = BSPlayer->GetAnimationAsset())
+		{
+			NJ->SetStringField(TEXT("blendSpaceAsset"), Asset->GetName());
+			NJ->SetStringField(TEXT("blendSpaceAssetPath"), Asset->GetPathName());
+		}
+	}
+	else if (auto* AssetPlayer = Cast<UAnimGraphNode_AssetPlayerBase>(Node))
+	{
+		NJ->SetStringField(TEXT("nodeType"), TEXT("AnimAssetPlayer"));
+		if (UAnimationAsset* Asset = AssetPlayer->GetAnimationAsset())
+		{
+			NJ->SetStringField(TEXT("animationAsset"), Asset->GetName());
+			NJ->SetStringField(TEXT("animationAssetPath"), Asset->GetPathName());
+		}
+	}
+	else if (Cast<UAnimGraphNode_Base>(Node))
+	{
+		NJ->SetStringField(TEXT("nodeType"), TEXT("AnimNode"));
+	}
+	else if (auto* StateNode = Cast<UAnimStateNode>(Node))
+	{
+		NJ->SetStringField(TEXT("nodeType"), TEXT("AnimState"));
+		NJ->SetStringField(TEXT("stateName"), StateNode->GetStateName());
+		NJ->SetBoolField(TEXT("bAlwaysResetOnEntry"), StateNode->bAlwaysResetOnEntry);
+	}
+	else if (auto* TransNode = Cast<UAnimStateTransitionNode>(Node))
+	{
+		NJ->SetStringField(TEXT("nodeType"), TEXT("AnimTransition"));
+		if (UAnimStateNode* FromState = Cast<UAnimStateNode>(TransNode->GetPreviousState()))
+		{
+			NJ->SetStringField(TEXT("fromState"), FromState->GetStateName());
+		}
+		if (UAnimStateNode* ToState = Cast<UAnimStateNode>(TransNode->GetNextState()))
+		{
+			NJ->SetStringField(TEXT("toState"), ToState->GetStateName());
+		}
+		NJ->SetNumberField(TEXT("crossfadeDuration"), TransNode->CrossfadeDuration);
+		NJ->SetNumberField(TEXT("blendMode"), (int32)TransNode->BlendMode);
+		NJ->SetNumberField(TEXT("priorityOrder"), TransNode->PriorityOrder);
+		NJ->SetNumberField(TEXT("logicType"), (int32)TransNode->LogicType.GetValue());
+		NJ->SetBoolField(TEXT("bBidirectional"), TransNode->Bidirectional);
+	}
+	else if (Cast<UAnimStateConduitNode>(Node))
+	{
+		NJ->SetStringField(TEXT("nodeType"), TEXT("AnimConduit"));
+	}
+	else if (Cast<UAnimStateEntryNode>(Node))
+	{
+		NJ->SetStringField(TEXT("nodeType"), TEXT("AnimStateEntry"));
 	}
 	// K2Node specifics — check CallParentFunction before CallFunction (inheritance)
 	else if (auto* CPF = Cast<UK2Node_CallParentFunction>(Node))

@@ -27,7 +27,9 @@ public class BlueprintMCP : ModuleRules
 			"Kismet",
 			"KismetCompiler",
 			"EditorSubsystem",
-			"MaterialEditor"
+			"MaterialEditor",
+			"AnimGraph",
+			"AnimGraphRuntime"
 		});
 	}
 }
