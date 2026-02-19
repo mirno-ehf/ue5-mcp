@@ -30,10 +30,11 @@ export function generateTempProject(): string {
   const dir = path.join(os.tmpdir(), `BlueprintMCP_Test_${Date.now()}`);
   fs.mkdirSync(dir, { recursive: true });
 
-  // Minimal .uproject
+  // Minimal .uproject — engine version must match the compiled plugin DLL
+  const engineVersion = detectEngineVersion();
   const uproject = {
     FileVersion: 3,
-    EngineAssociation: "5.4",
+    EngineAssociation: engineVersion,
     Plugins: [{ Name: "BlueprintMCP", Enabled: true }],
   };
   fs.writeFileSync(
@@ -63,16 +64,36 @@ export function generateTempProject(): string {
 // Commandlet lifecycle
 // ---------------------------------------------------------------------------
 
+/** Detect the UE engine version by scanning for installed engines (prefer newest). */
+function detectEngineVersion(): string {
+  const base = "C:\\Program Files\\Epic Games";
+  try {
+    const dirs = fs.readdirSync(base).filter((d) => d.startsWith("UE_"));
+    // Sort descending so newest version is first
+    dirs.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    if (dirs.length > 0) {
+      return dirs[0].replace("UE_", "");
+    }
+  } catch { /* directory not found */ }
+  return "5.4"; // fallback
+}
+
 function findEditorCmd(): string | null {
   if (process.env.UE_EDITOR_CMD && fs.existsSync(process.env.UE_EDITOR_CMD)) {
     return process.env.UE_EDITOR_CMD;
   }
-  const candidates = [
-    "C:\\Program Files\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor-Cmd.exe",
-    "C:\\Program Files (x86)\\Epic Games\\UE_5.4\\Engine\\Binaries\\Win64\\UnrealEditor-Cmd.exe",
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
+  // Scan for installed UE versions, preferring newest
+  const base = "C:\\Program Files\\Epic Games";
+  const bases = [base, "C:\\Program Files (x86)\\Epic Games"];
+  for (const b of bases) {
+    try {
+      const dirs = fs.readdirSync(b).filter((d) => d.startsWith("UE_"));
+      dirs.sort((a, bv) => bv.localeCompare(a, undefined, { numeric: true }));
+      for (const d of dirs) {
+        const cmd = path.join(b, d, "Engine", "Binaries", "Win64", "UnrealEditor-Cmd.exe");
+        if (fs.existsSync(cmd)) return cmd;
+      }
+    } catch { /* directory not found */ }
   }
   return null;
 }
