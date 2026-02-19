@@ -47,11 +47,11 @@ export function registerMaterialMutationTools(server: McpServer): void {
 
   server.tool(
     "set_material_property",
-    "Set a top-level property on a Material (domain, blendMode, twoSided, shadingModel).",
+    "Set a top-level property on a Material. Supported properties: domain, blendMode, twoSided, shadingModel, opacity/opacityMaskClipValue, bUsedWithSkeletalMesh, bUsedWithMorphTargets, bUsedWithNiagaraSprites, ditheredLODTransition, bAllowNegativeEmissiveColor.",
     {
       material: z.string().describe("Material name or package path (e.g. 'M_MyMaterial')"),
-      property: z.string().describe("Property name to set (e.g. 'domain', 'blendMode', 'twoSided', 'shadingModel')"),
-      value: z.string().describe("New value for the property"),
+      property: z.string().describe("Property name to set"),
+      value: z.union([z.string(), z.number(), z.boolean()]).describe("New value for the property (string for enums, number for floats, boolean for flags)"),
       dryRun: z.boolean().optional().describe("If true, preview changes without modifying the Material"),
     },
     async ({ material, property, value, dryRun }) => {
@@ -82,19 +82,25 @@ export function registerMaterialMutationTools(server: McpServer): void {
 
   server.tool(
     "add_material_expression",
-    "Add a new expression node to a Material's graph.",
+    "Add a new expression node to a Material or Material Function graph. Supports any UMaterialExpression subclass — use the class name without the 'MaterialExpression' prefix (e.g. 'Constant', 'Add', 'Subtract', 'Fresnel', 'Comment', 'If', 'Lerp').",
     {
-      material: z.string().describe("Material name or package path (e.g. 'M_MyMaterial')"),
-      expressionClass: z.string().describe("Expression type: Constant, ScalarParameter, VectorParameter, TextureSample, TextureSampleParameter2D, TextureCoordinate, Add, Multiply, Lerp, Clamp, OneMinus, Power, Time, WorldPosition, AppendVector, ComponentMask, Custom, StaticSwitchParameter, MaterialFunctionCall, Constant3Vector, Constant4Vector"),
+      material: z.string().optional().describe("Material name or package path (e.g. 'M_MyMaterial'). Provide either material or materialFunction."),
+      materialFunction: z.string().optional().describe("Material Function name or package path (e.g. 'MF_MyFunction'). Provide either material or materialFunction."),
+      expressionClass: z.string().describe("Expression class name without the 'MaterialExpression' prefix. Any UMaterialExpression subclass is supported (e.g. 'Constant', 'ScalarParameter', 'Add', 'Subtract', 'Fresnel', 'Comment', 'If', 'Lerp')."),
       posX: z.number().default(0).describe("X position in the graph editor"),
       posY: z.number().default(0).describe("Y position in the graph editor"),
-      dryRun: z.boolean().optional().describe("If true, preview changes without modifying the Material"),
+      dryRun: z.boolean().optional().describe("If true, preview changes without modifying the asset"),
     },
-    async ({ material, expressionClass, posX, posY, dryRun }) => {
+    async ({ material, materialFunction, expressionClass, posX, posY, dryRun }) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
-      const body: Record<string, any> = { material, expressionClass, posX, posY };
+      if (!material && !materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction'" }] };
+      if (material && materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction', not both" }] };
+
+      const body: Record<string, any> = { expressionClass, posX, posY };
+      if (material) body.material = material;
+      if (materialFunction) body.materialFunction = materialFunction;
       if (dryRun) body.dryRun = true;
 
       const data = await uePost("/api/add-material-expression", body);
@@ -128,17 +134,22 @@ export function registerMaterialMutationTools(server: McpServer): void {
 
   server.tool(
     "delete_material_expression",
-    "Delete an expression node from a Material's graph.",
+    "Delete an expression node from a Material or Material Function graph.",
     {
-      material: z.string().describe("Material name or package path (e.g. 'M_MyMaterial')"),
+      material: z.string().optional().describe("Material name or package path. Provide either material or materialFunction."),
+      materialFunction: z.string().optional().describe("Material Function name or package path. Provide either material or materialFunction."),
       nodeId: z.string().describe("GUID of the expression node to delete"),
-      dryRun: z.boolean().optional().describe("If true, preview changes without modifying the Material"),
+      dryRun: z.boolean().optional().describe("If true, preview changes without modifying the asset"),
     },
-    async ({ material, nodeId, dryRun }) => {
+    async ({ material, materialFunction, nodeId, dryRun }) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
-      const body: Record<string, any> = { material, nodeId };
+      if (!material && !materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction'" }] };
+
+      const body: Record<string, any> = { nodeId };
+      if (material) body.material = material;
+      if (materialFunction) body.materialFunction = materialFunction;
       if (dryRun) body.dryRun = true;
 
       const data = await uePost("/api/delete-material-expression", body);
@@ -164,20 +175,25 @@ export function registerMaterialMutationTools(server: McpServer): void {
 
   server.tool(
     "connect_material_pins",
-    "Connect two pins in a Material's graph.",
+    "Connect two pins in a Material or Material Function graph.",
     {
-      material: z.string().describe("Material name or package path (e.g. 'M_MyMaterial')"),
+      material: z.string().optional().describe("Material name or package path. Provide either material or materialFunction."),
+      materialFunction: z.string().optional().describe("Material Function name or package path. Provide either material or materialFunction."),
       sourceNodeId: z.string().describe("GUID of the source expression node"),
       sourcePinName: z.string().describe("Name of the output pin on the source node"),
       targetNodeId: z.string().describe("GUID of the target expression node (or 'Result' for the material result node)"),
       targetPinName: z.string().describe("Name of the input pin on the target node"),
-      dryRun: z.boolean().optional().describe("If true, preview changes without modifying the Material"),
+      dryRun: z.boolean().optional().describe("If true, preview changes without modifying the asset"),
     },
-    async ({ material, sourceNodeId, sourcePinName, targetNodeId, targetPinName, dryRun }) => {
+    async ({ material, materialFunction, sourceNodeId, sourcePinName, targetNodeId, targetPinName, dryRun }) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
-      const body: Record<string, any> = { material, sourceNodeId, sourcePinName, targetNodeId, targetPinName };
+      if (!material && !materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction'" }] };
+
+      const body: Record<string, any> = { sourceNodeId, sourcePinName, targetNodeId, targetPinName };
+      if (material) body.material = material;
+      if (materialFunction) body.materialFunction = materialFunction;
       if (dryRun) body.dryRun = true;
 
       const data = await uePost("/api/connect-material-pins", body);
@@ -207,18 +223,23 @@ export function registerMaterialMutationTools(server: McpServer): void {
 
   server.tool(
     "disconnect_material_pin",
-    "Disconnect all links from a specific pin in a Material's graph.",
+    "Disconnect all links from a specific pin in a Material or Material Function graph.",
     {
-      material: z.string().describe("Material name or package path (e.g. 'M_MyMaterial')"),
+      material: z.string().optional().describe("Material name or package path. Provide either material or materialFunction."),
+      materialFunction: z.string().optional().describe("Material Function name or package path. Provide either material or materialFunction."),
       nodeId: z.string().describe("GUID of the expression node containing the pin"),
       pinName: z.string().describe("Name of the pin to disconnect"),
-      dryRun: z.boolean().optional().describe("If true, preview changes without modifying the Material"),
+      dryRun: z.boolean().optional().describe("If true, preview changes without modifying the asset"),
     },
-    async ({ material, nodeId, pinName, dryRun }) => {
+    async ({ material, materialFunction, nodeId, pinName, dryRun }) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
-      const body: Record<string, any> = { material, nodeId, pinName };
+      if (!material && !materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction'" }] };
+
+      const body: Record<string, any> = { nodeId, pinName };
+      if (material) body.material = material;
+      if (materialFunction) body.materialFunction = materialFunction;
       if (dryRun) body.dryRun = true;
 
       const data = await uePost("/api/disconnect-material-pin", body);
@@ -241,9 +262,10 @@ export function registerMaterialMutationTools(server: McpServer): void {
 
   server.tool(
     "set_expression_value",
-    "Set the value of a material expression (constants, parameter defaults, custom code, etc.).",
+    "Set the value of a material expression (constants, parameter defaults, custom code, etc.) in a Material or Material Function.",
     {
-      material: z.string().describe("Material name or package path (e.g. 'M_MyMaterial')"),
+      material: z.string().optional().describe("Material name or package path. Provide either material or materialFunction."),
+      materialFunction: z.string().optional().describe("Material Function name or package path. Provide either material or materialFunction."),
       nodeId: z.string().describe("GUID of the expression node"),
       value: z.union([
         z.number(),
@@ -254,11 +276,15 @@ export function registerMaterialMutationTools(server: McpServer): void {
       code: z.string().optional().describe("Custom HLSL code (for Custom expression nodes)"),
       dryRun: z.boolean().optional().describe("If true, preview changes without modifying the Material"),
     },
-    async ({ material, nodeId, value, parameterName, code, dryRun }) => {
+    async ({ material, materialFunction, nodeId, value, parameterName, code, dryRun }) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
-      const body: Record<string, any> = { material, nodeId, value };
+      if (!material && !materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction'" }] };
+
+      const body: Record<string, any> = { nodeId, value };
+      if (material) body.material = material;
+      if (materialFunction) body.materialFunction = materialFunction;
       if (parameterName) body.parameterName = parameterName;
       if (code) body.code = code;
       if (dryRun) body.dryRun = true;
@@ -287,19 +313,24 @@ export function registerMaterialMutationTools(server: McpServer): void {
 
   server.tool(
     "move_material_expression",
-    "Move a material expression node to a new position in the graph editor.",
+    "Move a material expression node to a new position in the graph editor of a Material or Material Function.",
     {
-      material: z.string().describe("Material name or package path (e.g. 'M_MyMaterial')"),
+      material: z.string().optional().describe("Material name or package path. Provide either material or materialFunction."),
+      materialFunction: z.string().optional().describe("Material Function name or package path. Provide either material or materialFunction."),
       nodeId: z.string().describe("GUID of the expression node to move"),
       posX: z.number().describe("New X position"),
       posY: z.number().describe("New Y position"),
-      dryRun: z.boolean().optional().describe("If true, preview changes without modifying the Material"),
+      dryRun: z.boolean().optional().describe("If true, preview changes without modifying the asset"),
     },
-    async ({ material, nodeId, posX, posY, dryRun }) => {
+    async ({ material, materialFunction, nodeId, posX, posY, dryRun }) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
-      const body: Record<string, any> = { material, nodeId, posX, posY };
+      if (!material && !materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction'" }] };
+
+      const body: Record<string, any> = { nodeId, posX, posY };
+      if (material) body.material = material;
+      if (materialFunction) body.materialFunction = materialFunction;
       if (dryRun) body.dryRun = true;
 
       const data = await uePost("/api/move-material-expression", body);
@@ -682,6 +713,48 @@ export function registerMaterialMutationTools(server: McpServer): void {
         lines.push(`  1. Fix ${data.failed} failed reconnection(s) manually with connect_material_pins`);
       }
       lines.push(`  2. Use get_material_graph to verify the final state`);
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // Material Validation
+  // ---------------------------------------------------------------------------
+
+  server.tool(
+    "validate_material",
+    "Force-recompile a Material and check for compilation errors. Returns valid/invalid status with error details.",
+    {
+      material: z.string().describe("Material name or package path (e.g. 'M_MyMaterial')"),
+    },
+    async ({ material }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await uePost("/api/validate-material", { material });
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const lines: string[] = [];
+      lines.push(`Material: ${data.material || material}`);
+      lines.push(`Valid: ${data.valid ? "Yes" : "No"}`);
+      lines.push(`Expressions: ${data.expressionCount ?? 0}`);
+      lines.push(`Connections: ${data.connectionCount ?? 0}`);
+
+      if (data.errors?.length) {
+        lines.push(`\nCompilation errors (${data.errorCount}):`);
+        for (const e of data.errors) {
+          lines.push(`  - ${e}`);
+        }
+      }
+
+      if (data.valid) {
+        lines.push(`\nMaterial compiled successfully.`);
+      } else {
+        lines.push(`\nNext steps:`);
+        lines.push(`  1. Use get_material_graph to inspect the graph`);
+        lines.push(`  2. Fix the errors and re-validate`);
+      }
 
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }

@@ -49,6 +49,36 @@ describe("material read tools", () => {
       expect(data.blendMode).toBeDefined();
     });
 
+    it("returns usage flags", async () => {
+      const data = await ueGet("/api/material", { name: matName });
+      expect(data.error).toBeUndefined();
+      expect(data.usageFlags).toBeDefined();
+      expect(typeof data.usageFlags.bUsedWithSkeletalMesh).toBe("boolean");
+      expect(typeof data.usageFlags.bUsedWithMorphTargets).toBe("boolean");
+      expect(typeof data.usageFlags.bUsedWithNiagaraSprites).toBe("boolean");
+      expect(typeof data.usageFlags.bUsedWithParticleSprites).toBe("boolean");
+      expect(typeof data.usageFlags.bUsedWithStaticLighting).toBe("boolean");
+    });
+
+    it("returns opacityMaskClipValue", async () => {
+      const data = await ueGet("/api/material", { name: matName });
+      expect(data.error).toBeUndefined();
+      expect(typeof data.opacityMaskClipValue).toBe("number");
+    });
+
+    it("returns additional settings", async () => {
+      const data = await ueGet("/api/material", { name: matName });
+      expect(data.error).toBeUndefined();
+      expect(typeof data.ditheredLODTransition).toBe("boolean");
+      expect(typeof data.bAllowNegativeEmissiveColor).toBe("boolean");
+    });
+
+    it("returns textureSampleCount", async () => {
+      const data = await ueGet("/api/material", { name: matName });
+      expect(data.error).toBeUndefined();
+      expect(typeof data.textureSampleCount).toBe("number");
+    });
+
     it("returns error for non-existent material", async () => {
       const data = await ueGet("/api/material", { name: "M_NonExistent_XYZ_999" });
       expect(data.error).toBeDefined();

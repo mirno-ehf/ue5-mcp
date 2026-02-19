@@ -119,6 +119,21 @@ export async function createTestMaterialInstance(opts: {
 
 
 /**
+ * Create a test Material Function via the HTTP API.
+ */
+export async function createTestMaterialFunction(opts: {
+  name: string;
+  packagePath?: string;
+  description?: string;
+}): Promise<any> {
+  return uePost("/api/create-material-function", {
+    name: opts.name,
+    packagePath: opts.packagePath ?? "/Game/Test",
+    description: opts.description ?? "",
+  });
+}
+
+/**
  * Create a test Animation Blueprint via the HTTP API.
  */
 export async function createTestAnimBlueprint(opts: {

@@ -32,7 +32,7 @@ export function registerMaterialReadTools(server: McpServer): void {
 
   server.tool(
     "get_material",
-    "Get full details of a Material or Material Instance: domain, blend mode, shading model, parameters, expressions, referenced textures.",
+    "Get full details of a Material or Material Instance: domain, blend mode, shading model, parameters, expressions, referenced textures, usage flags, opacity clip value, texture sample count.",
     {
       name: z.string().describe("Material name or package path"),
     },

@@ -249,6 +249,9 @@ private:
 	FString HandleGetMaterialFunction(const TMap<FString, FString>& Params);
 	FString HandleCreateMaterialFunction(const FString& Body);
 
+	// ----- Material validation -----
+	FString HandleValidateMaterial(const FString& Body);
+
 	// ----- Material snapshot/diff/restore (Phase 5) -----
 	FString HandleSnapshotMaterialGraph(const FString& Body);
 	FString HandleDiffMaterialGraph(const FString& Body);

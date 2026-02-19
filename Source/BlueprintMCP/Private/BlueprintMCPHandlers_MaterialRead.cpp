@@ -241,6 +241,33 @@ FString FBlueprintMCPServer::HandleGetMaterial(const TMap<FString, FString>& Par
 		}
 		Result->SetNumberField(TEXT("graphNodeCount"), GraphNodeCount);
 
+		// Usage flags
+		TSharedRef<FJsonObject> UsageFlags = MakeShared<FJsonObject>();
+		UsageFlags->SetBoolField(TEXT("bUsedWithSkeletalMesh"), Material->bUsedWithSkeletalMesh != 0);
+		UsageFlags->SetBoolField(TEXT("bUsedWithMorphTargets"), Material->bUsedWithMorphTargets != 0);
+		UsageFlags->SetBoolField(TEXT("bUsedWithNiagaraSprites"), Material->bUsedWithNiagaraSprites != 0);
+		UsageFlags->SetBoolField(TEXT("bUsedWithParticleSprites"), Material->bUsedWithParticleSprites != 0);
+		UsageFlags->SetBoolField(TEXT("bUsedWithStaticLighting"), Material->bUsedWithStaticLighting != 0);
+		Result->SetObjectField(TEXT("usageFlags"), UsageFlags);
+
+		// Opacity mask clip value
+		Result->SetNumberField(TEXT("opacityMaskClipValue"), Material->OpacityMaskClipValue);
+
+		// Additional settings
+		Result->SetBoolField(TEXT("ditheredLODTransition"), Material->DitheredLODTransition != 0);
+		Result->SetBoolField(TEXT("bAllowNegativeEmissiveColor"), Material->bAllowNegativeEmissiveColor != 0);
+
+		// Texture sample count (simple expression scan)
+		int32 TextureSampleCount = 0;
+		for (UMaterialExpression* Expr : Expressions)
+		{
+			if (Expr && Expr->IsA<UMaterialExpressionTextureSample>())
+			{
+				TextureSampleCount++;
+			}
+		}
+		Result->SetNumberField(TEXT("textureSampleCount"), TextureSampleCount);
+
 		return JsonToString(Result);
 	}
 
@@ -864,6 +891,88 @@ FString FBlueprintMCPServer::HandleGetMaterialFunction(const TMap<FString, FStri
 			Result->SetObjectField(TEXT("graph"), GraphJson);
 		}
 	}
+
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleValidateMaterial — force recompile and check for errors
+// ============================================================
+
+FString FBlueprintMCPServer::HandleValidateMaterial(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString MaterialName = Json->GetStringField(TEXT("material"));
+	if (MaterialName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required field: material"));
+	}
+
+	// Load material
+	FString LoadError;
+	UMaterial* Material = LoadMaterialByName(MaterialName, LoadError);
+	if (!Material)
+	{
+		return MakeErrorJson(LoadError);
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Validating material '%s'"), *Material->GetName());
+
+	// Force recompile by triggering PreEditChange/PostEditChange
+	Material->PreEditChange(nullptr);
+	Material->PostEditChange();
+
+	// Collect compilation errors
+	TArray<TSharedPtr<FJsonValue>> ErrorArray;
+	bool bValid = true;
+
+	// Check for compilation errors via FMaterialResource on current platform
+	FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIShaderPlatform);
+	if (Resource)
+	{
+		const TArray<FString>& CompileErrors = Resource->GetCompileErrors();
+		for (const FString& Err : CompileErrors)
+		{
+			bValid = false;
+			ErrorArray.Add(MakeShared<FJsonValueString>(Err));
+		}
+	}
+
+	// Count expressions and connections
+	auto Expressions = Material->GetExpressions();
+	int32 ExprCount = Expressions.Num();
+	int32 ConnectionCount = 0;
+	if (Material->MaterialGraph)
+	{
+		for (UEdGraphNode* Node : Material->MaterialGraph->Nodes)
+		{
+			if (!Node) continue;
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin && Pin->Direction == EGPD_Output)
+				{
+					ConnectionCount += Pin->LinkedTo.Num();
+				}
+			}
+		}
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("valid"), bValid);
+	Result->SetStringField(TEXT("material"), Material->GetName());
+	Result->SetStringField(TEXT("materialPath"), Material->GetPathName());
+	Result->SetNumberField(TEXT("expressionCount"), ExprCount);
+	Result->SetNumberField(TEXT("connectionCount"), ConnectionCount);
+	Result->SetArrayField(TEXT("errors"), ErrorArray);
+	Result->SetNumberField(TEXT("errorCount"), ErrorArray.Num());
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Material '%s' validation %s (%d errors)"),
+		*Material->GetName(), bValid ? TEXT("passed") : TEXT("failed"), ErrorArray.Num());
 
 	return JsonToString(Result);
 }

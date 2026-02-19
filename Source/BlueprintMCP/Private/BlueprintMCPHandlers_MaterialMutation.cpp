@@ -9,22 +9,12 @@
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionStaticSwitchParameter.h"
 #include "Materials/MaterialExpressionConstant.h"
-#include "Materials/MaterialExpressionConstant2Vector.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
 #include "Materials/MaterialExpressionConstant4Vector.h"
 #include "Materials/MaterialExpressionTextureSample.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionCustom.h"
-#include "Materials/MaterialExpressionAppendVector.h"
-#include "Materials/MaterialExpressionAdd.h"
-#include "Materials/MaterialExpressionMultiply.h"
-#include "Materials/MaterialExpressionLinearInterpolate.h"
-#include "Materials/MaterialExpressionClamp.h"
-#include "Materials/MaterialExpressionOneMinus.h"
-#include "Materials/MaterialExpressionPower.h"
-#include "Materials/MaterialExpressionTime.h"
-#include "Materials/MaterialExpressionWorldPosition.h"
 #include "Materials/MaterialExpressionFunctionInput.h"
 #include "Materials/MaterialExpressionFunctionOutput.h"
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
@@ -45,6 +35,8 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "UObject/SavePackage.h"
+#include "UObject/UObjectIterator.h"
+#include "Kismet2/BlueprintEditorUtils.h"
 
 // ============================================================
 // Phase 2: Material Mutations
@@ -388,7 +380,7 @@ FString FBlueprintMCPServer::HandleSetMaterialProperty(const FString& Body)
 			Material->PostEditChange();
 		}
 	}
-	else if (Property == TEXT("opacity"))
+	else if (Property == TEXT("opacity") || Property == TEXT("opacityMaskClipValue"))
 	{
 		double OpacityValue = Json->GetNumberField(TEXT("value"));
 		OldValue = FString::Printf(TEXT("%f"), Material->OpacityMaskClipValue);
@@ -401,10 +393,77 @@ FString FBlueprintMCPServer::HandleSetMaterialProperty(const FString& Body)
 			Material->PostEditChange();
 		}
 	}
+	else if (Property == TEXT("bUsedWithSkeletalMesh"))
+	{
+		bool bValue = Json->GetBoolField(TEXT("value"));
+		OldValue = Material->bUsedWithSkeletalMesh ? TEXT("true") : TEXT("false");
+		NewValue = bValue ? TEXT("true") : TEXT("false");
+
+		if (!bDryRun)
+		{
+			Material->PreEditChange(nullptr);
+			Material->bUsedWithSkeletalMesh = bValue ? 1 : 0;
+			Material->PostEditChange();
+		}
+	}
+	else if (Property == TEXT("bUsedWithMorphTargets"))
+	{
+		bool bValue = Json->GetBoolField(TEXT("value"));
+		OldValue = Material->bUsedWithMorphTargets ? TEXT("true") : TEXT("false");
+		NewValue = bValue ? TEXT("true") : TEXT("false");
+
+		if (!bDryRun)
+		{
+			Material->PreEditChange(nullptr);
+			Material->bUsedWithMorphTargets = bValue ? 1 : 0;
+			Material->PostEditChange();
+		}
+	}
+	else if (Property == TEXT("bUsedWithNiagaraSprites"))
+	{
+		bool bValue = Json->GetBoolField(TEXT("value"));
+		OldValue = Material->bUsedWithNiagaraSprites ? TEXT("true") : TEXT("false");
+		NewValue = bValue ? TEXT("true") : TEXT("false");
+
+		if (!bDryRun)
+		{
+			Material->PreEditChange(nullptr);
+			Material->bUsedWithNiagaraSprites = bValue ? 1 : 0;
+			Material->PostEditChange();
+		}
+	}
+	else if (Property == TEXT("ditheredLODTransition") || Property == TEXT("DitheredLODTransition"))
+	{
+		bool bValue = Json->GetBoolField(TEXT("value"));
+		OldValue = Material->DitheredLODTransition ? TEXT("true") : TEXT("false");
+		NewValue = bValue ? TEXT("true") : TEXT("false");
+
+		if (!bDryRun)
+		{
+			Material->PreEditChange(nullptr);
+			Material->DitheredLODTransition = bValue ? 1 : 0;
+			Material->PostEditChange();
+		}
+	}
+	else if (Property == TEXT("bAllowNegativeEmissiveColor"))
+	{
+		bool bValue = Json->GetBoolField(TEXT("value"));
+		OldValue = Material->bAllowNegativeEmissiveColor ? TEXT("true") : TEXT("false");
+		NewValue = bValue ? TEXT("true") : TEXT("false");
+
+		if (!bDryRun)
+		{
+			Material->PreEditChange(nullptr);
+			Material->bAllowNegativeEmissiveColor = bValue ? 1 : 0;
+			Material->PostEditChange();
+		}
+	}
 	else
 	{
 		return MakeErrorJson(FString::Printf(
-			TEXT("Unknown property '%s'. Valid properties: domain, blendMode, twoSided, shadingModel, opacity"),
+			TEXT("Unknown property '%s'. Valid properties: domain, blendMode, twoSided, shadingModel, opacity, "
+				"opacityMaskClipValue, bUsedWithSkeletalMesh, bUsedWithMorphTargets, bUsedWithNiagaraSprites, "
+				"ditheredLODTransition, bAllowNegativeEmissiveColor"),
 			*Property));
 	}
 
@@ -448,9 +507,13 @@ FString FBlueprintMCPServer::HandleAddMaterialExpression(const FString& Body)
 	FString MaterialName = Json->GetStringField(TEXT("material"));
 	FString ExpressionClassName = Json->GetStringField(TEXT("expressionClass"));
 
-	if (MaterialName.IsEmpty() || ExpressionClassName.IsEmpty())
+	if (MaterialName.IsEmpty() && !Json->HasField(TEXT("materialFunction")))
 	{
-		return MakeErrorJson(TEXT("Missing required fields: material, expressionClass"));
+		return MakeErrorJson(TEXT("Missing required field: 'material' or 'materialFunction'"));
+	}
+	if (ExpressionClassName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required field: expressionClass"));
 	}
 
 	int32 PosX = 0, PosY = 0;
@@ -462,78 +525,81 @@ FString FBlueprintMCPServer::HandleAddMaterialExpression(const FString& Body)
 	bool bDryRun = false;
 	Json->TryGetBoolField(TEXT("dryRun"), bDryRun);
 
-	// Map string class name to UClass
+	// Map string class name to UClass via dynamic lookup
 	UClass* ExprClass = nullptr;
 
-	if (ExpressionClassName == TEXT("Constant"))
-		ExprClass = UMaterialExpressionConstant::StaticClass();
-	else if (ExpressionClassName == TEXT("Constant3Vector"))
-		ExprClass = UMaterialExpressionConstant3Vector::StaticClass();
-	else if (ExpressionClassName == TEXT("Constant4Vector"))
-		ExprClass = UMaterialExpressionConstant4Vector::StaticClass();
-	else if (ExpressionClassName == TEXT("ScalarParameter"))
-		ExprClass = UMaterialExpressionScalarParameter::StaticClass();
-	else if (ExpressionClassName == TEXT("VectorParameter"))
-		ExprClass = UMaterialExpressionVectorParameter::StaticClass();
-	else if (ExpressionClassName == TEXT("TextureSample"))
-		ExprClass = UMaterialExpressionTextureSample::StaticClass();
-	else if (ExpressionClassName == TEXT("TextureSampleParameter2D"))
-		ExprClass = UMaterialExpressionTextureSampleParameter2D::StaticClass();
-	else if (ExpressionClassName == TEXT("TextureCoordinate"))
-		ExprClass = UMaterialExpressionTextureCoordinate::StaticClass();
-	else if (ExpressionClassName == TEXT("ComponentMask"))
-		ExprClass = UMaterialExpressionComponentMask::StaticClass();
-	else if (ExpressionClassName == TEXT("Add"))
-		ExprClass = UMaterialExpressionAdd::StaticClass();
-	else if (ExpressionClassName == TEXT("Multiply"))
-		ExprClass = UMaterialExpressionMultiply::StaticClass();
-	else if (ExpressionClassName == TEXT("LinearInterpolate") || ExpressionClassName == TEXT("Lerp"))
-		ExprClass = UMaterialExpressionLinearInterpolate::StaticClass();
-	else if (ExpressionClassName == TEXT("Clamp"))
-		ExprClass = UMaterialExpressionClamp::StaticClass();
-	else if (ExpressionClassName == TEXT("OneMinus"))
-		ExprClass = UMaterialExpressionOneMinus::StaticClass();
-	else if (ExpressionClassName == TEXT("Power"))
-		ExprClass = UMaterialExpressionPower::StaticClass();
-	else if (ExpressionClassName == TEXT("Time"))
-		ExprClass = UMaterialExpressionTime::StaticClass();
-	else if (ExpressionClassName == TEXT("WorldPosition"))
-		ExprClass = UMaterialExpressionWorldPosition::StaticClass();
-	else if (ExpressionClassName == TEXT("AppendVector"))
-		ExprClass = UMaterialExpressionAppendVector::StaticClass();
-	else if (ExpressionClassName == TEXT("Custom"))
-		ExprClass = UMaterialExpressionCustom::StaticClass();
-	else if (ExpressionClassName == TEXT("StaticSwitchParameter"))
-		ExprClass = UMaterialExpressionStaticSwitchParameter::StaticClass();
-	else if (ExpressionClassName == TEXT("MaterialFunctionCall"))
-		ExprClass = UMaterialExpressionMaterialFunctionCall::StaticClass();
-	else
+	// Convenience aliases for backward compatibility
+	static TMap<FString, FString> Aliases = {
+		{TEXT("Lerp"), TEXT("LinearInterpolate")},
+	};
+
+	FString LookupName = ExpressionClassName;
+	if (const FString* Alias = Aliases.Find(ExpressionClassName))
 	{
-		return MakeErrorJson(FString::Printf(
-			TEXT("Unknown expression class '%s'. Valid classes: Constant, Constant3Vector, Constant4Vector, "
-				"ScalarParameter, VectorParameter, TextureSample, TextureSampleParameter2D, TextureCoordinate, "
-				"ComponentMask, Add, Multiply, LinearInterpolate, Lerp, Clamp, OneMinus, Power, Time, "
-				"WorldPosition, AppendVector, Custom, StaticSwitchParameter, MaterialFunctionCall"),
-			*ExpressionClassName));
+		LookupName = *Alias;
 	}
 
-	// Load material
-	FString LoadError;
-	UMaterial* Material = LoadMaterialByName(MaterialName, LoadError);
-	if (!Material)
+	// Dynamic lookup: find UMaterialExpression<Name> via UClass iteration
+	FString FullClassName = FString::Printf(TEXT("MaterialExpression%s"), *LookupName);
+	for (TObjectIterator<UClass> It; It; ++It)
 	{
-		return MakeErrorJson(LoadError);
+		if (It->GetName() == FullClassName && It->IsChildOf(UMaterialExpression::StaticClass()))
+		{
+			ExprClass = *It;
+			break;
+		}
+	}
+
+	if (!ExprClass)
+	{
+		return MakeErrorJson(FString::Printf(
+			TEXT("Unknown expression class '%s'. Use the UMaterialExpression subclass name without the 'MaterialExpression' prefix "
+				"(e.g. 'Constant', 'ScalarParameter', 'Add', 'Multiply', 'Lerp', 'Subtract', 'Fresnel', 'Comment', etc.)"),
+			*ExpressionClassName));
+	}
+	if (ExprClass->HasAnyClassFlags(CLASS_Abstract))
+	{
+		return MakeErrorJson(FString::Printf(
+			TEXT("Expression class '%s' is abstract and cannot be instantiated."), *ExpressionClassName));
+	}
+
+	// Load material or material function
+	FString MaterialFunctionName = Json->GetStringField(TEXT("materialFunction"));
+	UMaterial* Material = nullptr;
+	UMaterialFunction* MatFunc = nullptr;
+	UObject* Owner = nullptr;
+	FString AssetDisplayName;
+
+	if (!MaterialFunctionName.IsEmpty())
+	{
+		if (!MaterialName.IsEmpty())
+		{
+			return MakeErrorJson(TEXT("Specify either 'material' or 'materialFunction', not both"));
+		}
+		FString LoadError;
+		MatFunc = LoadMaterialFunctionByName(MaterialFunctionName, LoadError);
+		if (!MatFunc) return MakeErrorJson(LoadError);
+		Owner = MatFunc;
+		AssetDisplayName = MatFunc->GetName();
+	}
+	else
+	{
+		FString LoadError;
+		Material = LoadMaterialByName(MaterialName, LoadError);
+		if (!Material) return MakeErrorJson(LoadError);
+		Owner = Material;
+		AssetDisplayName = Material->GetName();
 	}
 
 	if (bDryRun)
 	{
-		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: [DRY RUN] Would add expression '%s' to material '%s' at (%d, %d)"),
-			*ExpressionClassName, *MaterialName, PosX, PosY);
+		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: [DRY RUN] Would add expression '%s' to '%s' at (%d, %d)"),
+			*ExpressionClassName, *AssetDisplayName, PosX, PosY);
 
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 		Result->SetBoolField(TEXT("success"), true);
 		Result->SetBoolField(TEXT("dryRun"), true);
-		Result->SetStringField(TEXT("material"), Material->GetName());
+		Result->SetStringField(TEXT("material"), AssetDisplayName);
 		Result->SetStringField(TEXT("expressionClass"), ExpressionClassName);
 		Result->SetNumberField(TEXT("posX"), PosX);
 		Result->SetNumberField(TEXT("posY"), PosY);
@@ -541,7 +607,7 @@ FString FBlueprintMCPServer::HandleAddMaterialExpression(const FString& Body)
 	}
 
 	// Create the expression
-	UMaterialExpression* NewExpr = NewObject<UMaterialExpression>(Material, ExprClass);
+	UMaterialExpression* NewExpr = NewObject<UMaterialExpression>(Owner, ExprClass);
 	if (!NewExpr)
 	{
 		return MakeErrorJson(TEXT("Failed to create material expression object"));
@@ -551,25 +617,32 @@ FString FBlueprintMCPServer::HandleAddMaterialExpression(const FString& Body)
 	NewExpr->MaterialExpressionEditorX = PosX;
 	NewExpr->MaterialExpressionEditorY = PosY;
 
-	// Add to material (UE 5.4 compatible)
-	Material->GetExpressionCollection().AddExpression(NewExpr);
-
-	// Rebuild material graph if it exists
-	if (Material->MaterialGraph)
+	// Add to material or material function
+	if (Material)
 	{
-		Material->MaterialGraph->RebuildGraph();
+		Material->GetExpressionCollection().AddExpression(NewExpr);
+		if (Material->MaterialGraph)
+		{
+			Material->MaterialGraph->RebuildGraph();
+		}
+		Material->PreEditChange(nullptr);
+		Material->PostEditChange();
+		Material->MarkPackageDirty();
+	}
+	else if (MatFunc)
+	{
+		MatFunc->GetExpressionCollection().AddExpression(NewExpr);
+		MatFunc->PreEditChange(nullptr);
+		MatFunc->PostEditChange();
+		MatFunc->MarkPackageDirty();
 	}
 
-	Material->PreEditChange(nullptr);
-	Material->PostEditChange();
-	Material->MarkPackageDirty();
-
 	// Save
-	bool bSaved = SaveMaterialPackage(Material);
+	bool bSaved = Material ? SaveMaterialPackage(Material) : SaveGenericPackage(MatFunc);
 
-	// Find the node GUID from the material graph
+	// Find the node GUID from the material graph (only for materials)
 	FString NodeGuid;
-	if (Material->MaterialGraph)
+	if (Material && Material->MaterialGraph)
 	{
 		for (UEdGraphNode* Node : Material->MaterialGraph->Nodes)
 		{
@@ -582,15 +655,15 @@ FString FBlueprintMCPServer::HandleAddMaterialExpression(const FString& Body)
 		}
 	}
 
-	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Added expression '%s' to material '%s' (nodeId: %s, saved: %s)"),
-		*ExpressionClassName, *MaterialName, *NodeGuid, bSaved ? TEXT("true") : TEXT("false"));
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Added expression '%s' to '%s' (nodeId: %s, saved: %s)"),
+		*ExpressionClassName, *AssetDisplayName, *NodeGuid, bSaved ? TEXT("true") : TEXT("false"));
 
 	// Serialize the expression details
 	TSharedPtr<FJsonObject> ExprDetails = SerializeMaterialExpression(NewExpr);
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), true);
-	Result->SetStringField(TEXT("material"), Material->GetName());
+	Result->SetStringField(TEXT("material"), AssetDisplayName);
 	Result->SetStringField(TEXT("expressionClass"), ExpressionClassName);
 	Result->SetStringField(TEXT("nodeId"), NodeGuid);
 	Result->SetNumberField(TEXT("posX"), PosX);
@@ -616,32 +689,51 @@ FString FBlueprintMCPServer::HandleDeleteMaterialExpression(const FString& Body)
 	}
 
 	FString MaterialName = Json->GetStringField(TEXT("material"));
+	FString MaterialFunctionName = Json->GetStringField(TEXT("materialFunction"));
 	FString NodeId = Json->GetStringField(TEXT("nodeId"));
 
-	if (MaterialName.IsEmpty() || NodeId.IsEmpty())
+	if (MaterialName.IsEmpty() && MaterialFunctionName.IsEmpty())
 	{
-		return MakeErrorJson(TEXT("Missing required fields: material, nodeId"));
+		return MakeErrorJson(TEXT("Missing required field: 'material' or 'materialFunction'"));
+	}
+	if (NodeId.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required field: nodeId"));
 	}
 
 	bool bDryRun = false;
 	Json->TryGetBoolField(TEXT("dryRun"), bDryRun);
 
-	// Load material
-	FString LoadError;
-	UMaterial* Material = LoadMaterialByName(MaterialName, LoadError);
-	if (!Material)
+	// Load material or material function
+	UMaterial* Material = nullptr;
+	UMaterialFunction* MatFunc = nullptr;
+	FString AssetDisplayName;
+
+	if (!MaterialFunctionName.IsEmpty())
 	{
-		return MakeErrorJson(LoadError);
+		FString LoadError;
+		MatFunc = LoadMaterialFunctionByName(MaterialFunctionName, LoadError);
+		if (!MatFunc) return MakeErrorJson(LoadError);
+		AssetDisplayName = MatFunc->GetName();
+	}
+	else
+	{
+		FString LoadError;
+		Material = LoadMaterialByName(MaterialName, LoadError);
+		if (!Material) return MakeErrorJson(LoadError);
+		AssetDisplayName = Material->GetName();
 	}
 
-	if (!Material->MaterialGraph)
+	// For materials, we need the graph to find nodes by GUID
+	UEdGraph* Graph = Material ? (UEdGraph*)Material->MaterialGraph : (MatFunc ? MatFunc->MaterialGraph : nullptr);
+	if (!Graph)
 	{
-		return MakeErrorJson(FString::Printf(TEXT("Material '%s' has no material graph"), *MaterialName));
+		return MakeErrorJson(FString::Printf(TEXT("'%s' has no material graph"), *AssetDisplayName));
 	}
 
 	// Find the node by GUID
 	UMaterialGraphNode* TargetMatNode = nullptr;
-	for (UEdGraphNode* Node : Material->MaterialGraph->Nodes)
+	for (UEdGraphNode* Node : Graph->Nodes)
 	{
 		if (!Node) continue;
 		if (Node->NodeGuid.ToString() == NodeId)
@@ -667,40 +759,48 @@ FString FBlueprintMCPServer::HandleDeleteMaterialExpression(const FString& Body)
 
 	if (bDryRun)
 	{
-		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: [DRY RUN] Would delete expression '%s' (nodeId: %s) from material '%s'"),
-			*DeletedExprClass, *NodeId, *MaterialName);
+		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: [DRY RUN] Would delete expression '%s' (nodeId: %s) from '%s'"),
+			*DeletedExprClass, *NodeId, *AssetDisplayName);
 
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 		Result->SetBoolField(TEXT("success"), true);
 		Result->SetBoolField(TEXT("dryRun"), true);
-		Result->SetStringField(TEXT("material"), Material->GetName());
+		Result->SetStringField(TEXT("material"), AssetDisplayName);
 		Result->SetStringField(TEXT("deletedNode"), NodeId);
 		Result->SetStringField(TEXT("deletedNodeTitle"), DeletedNodeTitle);
 		Result->SetStringField(TEXT("deletedExpressionClass"), DeletedExprClass);
 		return JsonToString(Result);
 	}
 
-	// Remove the expression from the material
+	// Remove the expression
 	UMaterialExpression* ExprToRemove = TargetMatNode->MaterialExpression;
-	Material->GetExpressionCollection().RemoveExpression(ExprToRemove);
+	if (Material)
+	{
+		Material->GetExpressionCollection().RemoveExpression(ExprToRemove);
+	}
+	else
+	{
+		MatFunc->GetExpressionCollection().RemoveExpression(ExprToRemove);
+	}
 	ExprToRemove->MarkAsGarbage();
 
 	// Rebuild graph
-	Material->MaterialGraph->RebuildGraph();
+	Graph->NotifyGraphChanged();
 
-	Material->PreEditChange(nullptr);
-	Material->PostEditChange();
-	Material->MarkPackageDirty();
+	UObject* Asset = Material ? (UObject*)Material : (UObject*)MatFunc;
+	Asset->PreEditChange(nullptr);
+	Asset->PostEditChange();
+	Asset->MarkPackageDirty();
 
 	// Save
-	bool bSaved = SaveMaterialPackage(Material);
+	bool bSaved = Material ? SaveMaterialPackage(Material) : SaveGenericPackage(MatFunc);
 
-	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Deleted expression '%s' (nodeId: %s) from material '%s' (saved: %s)"),
-		*DeletedExprClass, *NodeId, *MaterialName, bSaved ? TEXT("true") : TEXT("false"));
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Deleted expression '%s' (nodeId: %s) from '%s' (saved: %s)"),
+		*DeletedExprClass, *NodeId, *AssetDisplayName, bSaved ? TEXT("true") : TEXT("false"));
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), true);
-	Result->SetStringField(TEXT("material"), Material->GetName());
+	Result->SetStringField(TEXT("material"), AssetDisplayName);
 	Result->SetStringField(TEXT("deletedNode"), NodeId);
 	Result->SetStringField(TEXT("deletedNodeTitle"), DeletedNodeTitle);
 	Result->SetStringField(TEXT("deletedExpressionClass"), DeletedExprClass);
@@ -721,38 +821,55 @@ FString FBlueprintMCPServer::HandleConnectMaterialPins(const FString& Body)
 	}
 
 	FString MaterialName = Json->GetStringField(TEXT("material"));
+	FString MaterialFunctionName = Json->GetStringField(TEXT("materialFunction"));
 	FString SourceNodeId = Json->GetStringField(TEXT("sourceNodeId"));
 	FString SourcePinName = Json->GetStringField(TEXT("sourcePinName"));
 	FString TargetNodeId = Json->GetStringField(TEXT("targetNodeId"));
 	FString TargetPinName = Json->GetStringField(TEXT("targetPinName"));
 
-	if (MaterialName.IsEmpty() || SourceNodeId.IsEmpty() || SourcePinName.IsEmpty() ||
-		TargetNodeId.IsEmpty() || TargetPinName.IsEmpty())
+	if (MaterialName.IsEmpty() && MaterialFunctionName.IsEmpty())
 	{
-		return MakeErrorJson(TEXT("Missing required fields: material, sourceNodeId, sourcePinName, targetNodeId, targetPinName"));
+		return MakeErrorJson(TEXT("Missing required field: 'material' or 'materialFunction'"));
+	}
+	if (SourceNodeId.IsEmpty() || SourcePinName.IsEmpty() || TargetNodeId.IsEmpty() || TargetPinName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: sourceNodeId, sourcePinName, targetNodeId, targetPinName"));
 	}
 
 	bool bDryRun = false;
 	Json->TryGetBoolField(TEXT("dryRun"), bDryRun);
 
-	// Load material
-	FString LoadError;
-	UMaterial* Material = LoadMaterialByName(MaterialName, LoadError);
-	if (!Material)
+	// Load material or material function
+	UMaterial* Material = nullptr;
+	UMaterialFunction* MatFunc = nullptr;
+	FString AssetDisplayName;
+
+	if (!MaterialFunctionName.IsEmpty())
 	{
-		return MakeErrorJson(LoadError);
+		FString LoadError;
+		MatFunc = LoadMaterialFunctionByName(MaterialFunctionName, LoadError);
+		if (!MatFunc) return MakeErrorJson(LoadError);
+		AssetDisplayName = MatFunc->GetName();
+	}
+	else
+	{
+		FString LoadError;
+		Material = LoadMaterialByName(MaterialName, LoadError);
+		if (!Material) return MakeErrorJson(LoadError);
+		AssetDisplayName = Material->GetName();
 	}
 
-	if (!Material->MaterialGraph)
+	UEdGraph* Graph = Material ? (UEdGraph*)Material->MaterialGraph : (MatFunc ? MatFunc->MaterialGraph : nullptr);
+	if (!Graph)
 	{
-		return MakeErrorJson(FString::Printf(TEXT("Material '%s' has no material graph"), *MaterialName));
+		return MakeErrorJson(FString::Printf(TEXT("'%s' has no material graph"), *AssetDisplayName));
 	}
 
 	// Find source and target nodes by GUID
 	UEdGraphNode* SourceNode = nullptr;
 	UEdGraphNode* TargetNode = nullptr;
 
-	for (UEdGraphNode* Node : Material->MaterialGraph->Nodes)
+	for (UEdGraphNode* Node : Graph->Nodes)
 	{
 		if (!Node) continue;
 		if (Node->NodeGuid.ToString() == SourceNodeId)
@@ -810,22 +927,22 @@ FString FBlueprintMCPServer::HandleConnectMaterialPins(const FString& Body)
 
 	if (bDryRun)
 	{
-		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: [DRY RUN] Would connect %s.%s -> %s.%s in material '%s'"),
-			*SourceNodeId, *SourcePinName, *TargetNodeId, *TargetPinName, *MaterialName);
+		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: [DRY RUN] Would connect %s.%s -> %s.%s in '%s'"),
+			*SourceNodeId, *SourcePinName, *TargetNodeId, *TargetPinName, *AssetDisplayName);
 
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 		Result->SetBoolField(TEXT("success"), true);
 		Result->SetBoolField(TEXT("dryRun"), true);
 		Result->SetBoolField(TEXT("connected"), false);
-		Result->SetStringField(TEXT("material"), Material->GetName());
+		Result->SetStringField(TEXT("material"), AssetDisplayName);
 		return JsonToString(Result);
 	}
 
-	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Connecting %s.%s -> %s.%s in material '%s'"),
-		*SourceNodeId, *SourcePinName, *TargetNodeId, *TargetPinName, *MaterialName);
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Connecting %s.%s -> %s.%s in '%s'"),
+		*SourceNodeId, *SourcePinName, *TargetNodeId, *TargetPinName, *AssetDisplayName);
 
 	// Try to connect via the schema
-	const UEdGraphSchema* Schema = Material->MaterialGraph->GetSchema();
+	const UEdGraphSchema* Schema = Graph->GetSchema();
 	if (!Schema)
 	{
 		return MakeErrorJson(TEXT("Material graph schema not found"));
@@ -836,7 +953,7 @@ FString FBlueprintMCPServer::HandleConnectMaterialPins(const FString& Body)
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), bConnected);
 	Result->SetBoolField(TEXT("connected"), bConnected);
-	Result->SetStringField(TEXT("material"), Material->GetName());
+	Result->SetStringField(TEXT("material"), AssetDisplayName);
 
 	if (!bConnected)
 	{
@@ -847,9 +964,10 @@ FString FBlueprintMCPServer::HandleConnectMaterialPins(const FString& Body)
 	}
 
 	// Save
-	Material->PreEditChange(nullptr);
-	Material->PostEditChange();
-	bool bSaved = SaveMaterialPackage(Material);
+	UObject* Asset = Material ? (UObject*)Material : (UObject*)MatFunc;
+	Asset->PreEditChange(nullptr);
+	Asset->PostEditChange();
+	bool bSaved = Material ? SaveMaterialPackage(Material) : SaveGenericPackage(MatFunc);
 	Result->SetBoolField(TEXT("saved"), bSaved);
 
 	return JsonToString(Result);
@@ -868,33 +986,51 @@ FString FBlueprintMCPServer::HandleDisconnectMaterialPin(const FString& Body)
 	}
 
 	FString MaterialName = Json->GetStringField(TEXT("material"));
+	FString MaterialFunctionName = Json->GetStringField(TEXT("materialFunction"));
 	FString NodeId = Json->GetStringField(TEXT("nodeId"));
 	FString PinName = Json->GetStringField(TEXT("pinName"));
 
-	if (MaterialName.IsEmpty() || NodeId.IsEmpty() || PinName.IsEmpty())
+	if (MaterialName.IsEmpty() && MaterialFunctionName.IsEmpty())
 	{
-		return MakeErrorJson(TEXT("Missing required fields: material, nodeId, pinName"));
+		return MakeErrorJson(TEXT("Missing required field: 'material' or 'materialFunction'"));
+	}
+	if (NodeId.IsEmpty() || PinName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: nodeId, pinName"));
 	}
 
 	bool bDryRun = false;
 	Json->TryGetBoolField(TEXT("dryRun"), bDryRun);
 
-	// Load material
-	FString LoadError;
-	UMaterial* Material = LoadMaterialByName(MaterialName, LoadError);
-	if (!Material)
+	// Load material or material function
+	UMaterial* Material = nullptr;
+	UMaterialFunction* MatFunc = nullptr;
+	FString AssetDisplayName;
+
+	if (!MaterialFunctionName.IsEmpty())
 	{
-		return MakeErrorJson(LoadError);
+		FString LoadError;
+		MatFunc = LoadMaterialFunctionByName(MaterialFunctionName, LoadError);
+		if (!MatFunc) return MakeErrorJson(LoadError);
+		AssetDisplayName = MatFunc->GetName();
+	}
+	else
+	{
+		FString LoadError;
+		Material = LoadMaterialByName(MaterialName, LoadError);
+		if (!Material) return MakeErrorJson(LoadError);
+		AssetDisplayName = Material->GetName();
 	}
 
-	if (!Material->MaterialGraph)
+	UEdGraph* Graph = Material ? (UEdGraph*)Material->MaterialGraph : (MatFunc ? MatFunc->MaterialGraph : nullptr);
+	if (!Graph)
 	{
-		return MakeErrorJson(FString::Printf(TEXT("Material '%s' has no material graph"), *MaterialName));
+		return MakeErrorJson(FString::Printf(TEXT("'%s' has no material graph"), *AssetDisplayName));
 	}
 
 	// Find node by GUID
 	UEdGraphNode* TargetNode = nullptr;
-	for (UEdGraphNode* Node : Material->MaterialGraph->Nodes)
+	for (UEdGraphNode* Node : Graph->Nodes)
 	{
 		if (!Node) continue;
 		if (Node->NodeGuid.ToString() == NodeId)
@@ -931,34 +1067,35 @@ FString FBlueprintMCPServer::HandleDisconnectMaterialPin(const FString& Body)
 
 	if (bDryRun)
 	{
-		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: [DRY RUN] Would disconnect pin '%s' on node '%s' in material '%s' (%d links)"),
-			*PinName, *NodeId, *MaterialName, BrokenCount);
+		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: [DRY RUN] Would disconnect pin '%s' on node '%s' in '%s' (%d links)"),
+			*PinName, *NodeId, *AssetDisplayName, BrokenCount);
 
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 		Result->SetBoolField(TEXT("success"), true);
 		Result->SetBoolField(TEXT("dryRun"), true);
-		Result->SetStringField(TEXT("material"), Material->GetName());
+		Result->SetStringField(TEXT("material"), AssetDisplayName);
 		Result->SetStringField(TEXT("nodeId"), NodeId);
 		Result->SetStringField(TEXT("pinName"), PinName);
 		Result->SetNumberField(TEXT("brokenLinkCount"), BrokenCount);
 		return JsonToString(Result);
 	}
 
-	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Disconnecting pin '%s' on node '%s' in material '%s' (%d links)"),
-		*PinName, *NodeId, *MaterialName, BrokenCount);
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Disconnecting pin '%s' on node '%s' in '%s' (%d links)"),
+		*PinName, *NodeId, *AssetDisplayName, BrokenCount);
 
 	// Break all links
 	Pin->BreakAllPinLinks();
 
-	Material->PreEditChange(nullptr);
-	Material->PostEditChange();
+	UObject* Asset = Material ? (UObject*)Material : (UObject*)MatFunc;
+	Asset->PreEditChange(nullptr);
+	Asset->PostEditChange();
 
 	// Save
-	bool bSaved = SaveMaterialPackage(Material);
+	bool bSaved = Material ? SaveMaterialPackage(Material) : SaveGenericPackage(MatFunc);
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), true);
-	Result->SetStringField(TEXT("material"), Material->GetName());
+	Result->SetStringField(TEXT("material"), AssetDisplayName);
 	Result->SetStringField(TEXT("nodeId"), NodeId);
 	Result->SetStringField(TEXT("pinName"), PinName);
 	Result->SetNumberField(TEXT("brokenLinkCount"), BrokenCount);
@@ -979,11 +1116,16 @@ FString FBlueprintMCPServer::HandleSetExpressionValue(const FString& Body)
 	}
 
 	FString MaterialName = Json->GetStringField(TEXT("material"));
+	FString MaterialFunctionName = Json->GetStringField(TEXT("materialFunction"));
 	FString NodeId = Json->GetStringField(TEXT("nodeId"));
 
-	if (MaterialName.IsEmpty() || NodeId.IsEmpty())
+	if (MaterialName.IsEmpty() && MaterialFunctionName.IsEmpty())
 	{
-		return MakeErrorJson(TEXT("Missing required fields: material, nodeId"));
+		return MakeErrorJson(TEXT("Missing required field: 'material' or 'materialFunction'"));
+	}
+	if (NodeId.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required field: nodeId"));
 	}
 
 	if (!Json->HasField(TEXT("value")))
@@ -991,22 +1133,35 @@ FString FBlueprintMCPServer::HandleSetExpressionValue(const FString& Body)
 		return MakeErrorJson(TEXT("Missing required field: value"));
 	}
 
-	// Load material
-	FString LoadError;
-	UMaterial* Material = LoadMaterialByName(MaterialName, LoadError);
-	if (!Material)
+	// Load material or material function
+	UMaterial* Material = nullptr;
+	UMaterialFunction* MatFunc = nullptr;
+	FString AssetDisplayName;
+
+	if (!MaterialFunctionName.IsEmpty())
 	{
-		return MakeErrorJson(LoadError);
+		FString LoadError;
+		MatFunc = LoadMaterialFunctionByName(MaterialFunctionName, LoadError);
+		if (!MatFunc) return MakeErrorJson(LoadError);
+		AssetDisplayName = MatFunc->GetName();
+	}
+	else
+	{
+		FString LoadError;
+		Material = LoadMaterialByName(MaterialName, LoadError);
+		if (!Material) return MakeErrorJson(LoadError);
+		AssetDisplayName = Material->GetName();
 	}
 
-	if (!Material->MaterialGraph)
+	UEdGraph* Graph = Material ? (UEdGraph*)Material->MaterialGraph : (MatFunc ? MatFunc->MaterialGraph : nullptr);
+	if (!Graph)
 	{
-		return MakeErrorJson(FString::Printf(TEXT("Material '%s' has no material graph"), *MaterialName));
+		return MakeErrorJson(FString::Printf(TEXT("'%s' has no material graph"), *AssetDisplayName));
 	}
 
 	// Find the node by GUID
 	UMaterialGraphNode* TargetMatNode = nullptr;
-	for (UEdGraphNode* Node : Material->MaterialGraph->Nodes)
+	for (UEdGraphNode* Node : Graph->Nodes)
 	{
 		if (!Node) continue;
 		if (Node->NodeGuid.ToString() == NodeId)
@@ -1030,7 +1185,8 @@ FString FBlueprintMCPServer::HandleSetExpressionValue(const FString& Body)
 	FString ExprType;
 	FString NewValueStr;
 
-	Material->PreEditChange(nullptr);
+	UObject* Asset = Material ? (UObject*)Material : (UObject*)MatFunc;
+	Asset->PreEditChange(nullptr);
 
 	// Handle based on expression type
 	if (UMaterialExpressionConstant* ConstExpr = Cast<UMaterialExpressionConstant>(Expr))
@@ -1055,7 +1211,7 @@ FString FBlueprintMCPServer::HandleSetExpressionValue(const FString& Body)
 		}
 		else
 		{
-			Material->PostEditChange();
+			Asset->PostEditChange();
 			return MakeErrorJson(TEXT("Constant3Vector requires value as object {r, g, b}"));
 		}
 	}
@@ -1075,7 +1231,7 @@ FString FBlueprintMCPServer::HandleSetExpressionValue(const FString& Body)
 		}
 		else
 		{
-			Material->PostEditChange();
+			Asset->PostEditChange();
 			return MakeErrorJson(TEXT("Constant4Vector requires value as object {r, g, b, a}"));
 		}
 	}
@@ -1108,7 +1264,7 @@ FString FBlueprintMCPServer::HandleSetExpressionValue(const FString& Body)
 		}
 		else
 		{
-			Material->PostEditChange();
+			Asset->PostEditChange();
 			return MakeErrorJson(TEXT("VectorParameter requires value as object {r, g, b, a}"));
 		}
 
@@ -1135,7 +1291,7 @@ FString FBlueprintMCPServer::HandleSetExpressionValue(const FString& Body)
 		}
 		else
 		{
-			Material->PostEditChange();
+			Asset->PostEditChange();
 			return MakeErrorJson(TEXT("TextureCoordinate requires value as object {coordinateIndex, uTiling, vTiling}"));
 		}
 	}
@@ -1192,13 +1348,13 @@ FString FBlueprintMCPServer::HandleSetExpressionValue(const FString& Body)
 		}
 		else
 		{
-			Material->PostEditChange();
+			Asset->PostEditChange();
 			return MakeErrorJson(TEXT("ComponentMask requires value as object {r, g, b, a} (booleans)"));
 		}
 	}
 	else
 	{
-		Material->PostEditChange();
+		Asset->PostEditChange();
 		return MakeErrorJson(FString::Printf(
 			TEXT("Expression type '%s' does not support direct value setting. Supported types: Constant, "
 				"Constant3Vector, Constant4Vector, ScalarParameter, VectorParameter, TextureCoordinate, "
@@ -1206,18 +1362,18 @@ FString FBlueprintMCPServer::HandleSetExpressionValue(const FString& Body)
 			*Expr->GetClass()->GetName()));
 	}
 
-	Material->PostEditChange();
-	Material->MarkPackageDirty();
+	Asset->PostEditChange();
+	Asset->MarkPackageDirty();
 
 	// Save
-	bool bSaved = SaveMaterialPackage(Material);
+	bool bSaved = Material ? SaveMaterialPackage(Material) : SaveGenericPackage(MatFunc);
 
-	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Set expression value on node '%s' (%s) in material '%s': %s"),
-		*NodeId, *ExprType, *MaterialName, *NewValueStr);
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Set expression value on node '%s' (%s) in '%s': %s"),
+		*NodeId, *ExprType, *AssetDisplayName, *NewValueStr);
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), true);
-	Result->SetStringField(TEXT("material"), Material->GetName());
+	Result->SetStringField(TEXT("material"), AssetDisplayName);
 	Result->SetStringField(TEXT("nodeId"), NodeId);
 	Result->SetStringField(TEXT("expressionType"), ExprType);
 	Result->SetStringField(TEXT("newValue"), NewValueStr);
@@ -1238,11 +1394,16 @@ FString FBlueprintMCPServer::HandleMoveMaterialExpression(const FString& Body)
 	}
 
 	FString MaterialName = Json->GetStringField(TEXT("material"));
+	FString MaterialFunctionName = Json->GetStringField(TEXT("materialFunction"));
 	FString NodeId = Json->GetStringField(TEXT("nodeId"));
 
-	if (MaterialName.IsEmpty() || NodeId.IsEmpty())
+	if (MaterialName.IsEmpty() && MaterialFunctionName.IsEmpty())
 	{
-		return MakeErrorJson(TEXT("Missing required fields: material, nodeId"));
+		return MakeErrorJson(TEXT("Missing required field: 'material' or 'materialFunction'"));
+	}
+	if (NodeId.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required field: nodeId"));
 	}
 
 	if (!Json->HasField(TEXT("posX")) || !Json->HasField(TEXT("posY")))
@@ -1256,22 +1417,35 @@ FString FBlueprintMCPServer::HandleMoveMaterialExpression(const FString& Body)
 	bool bDryRun = false;
 	Json->TryGetBoolField(TEXT("dryRun"), bDryRun);
 
-	// Load material
-	FString LoadError;
-	UMaterial* Material = LoadMaterialByName(MaterialName, LoadError);
-	if (!Material)
+	// Load material or material function
+	UMaterial* Material = nullptr;
+	UMaterialFunction* MatFunc = nullptr;
+	FString AssetDisplayName;
+
+	if (!MaterialFunctionName.IsEmpty())
 	{
-		return MakeErrorJson(LoadError);
+		FString LoadError;
+		MatFunc = LoadMaterialFunctionByName(MaterialFunctionName, LoadError);
+		if (!MatFunc) return MakeErrorJson(LoadError);
+		AssetDisplayName = MatFunc->GetName();
+	}
+	else
+	{
+		FString LoadError;
+		Material = LoadMaterialByName(MaterialName, LoadError);
+		if (!Material) return MakeErrorJson(LoadError);
+		AssetDisplayName = Material->GetName();
 	}
 
-	if (!Material->MaterialGraph)
+	UEdGraph* Graph = Material ? (UEdGraph*)Material->MaterialGraph : (MatFunc ? MatFunc->MaterialGraph : nullptr);
+	if (!Graph)
 	{
-		return MakeErrorJson(FString::Printf(TEXT("Material '%s' has no material graph"), *MaterialName));
+		return MakeErrorJson(FString::Printf(TEXT("'%s' has no material graph"), *AssetDisplayName));
 	}
 
 	// Find node by GUID
 	UMaterialGraphNode* TargetMatNode = nullptr;
-	for (UEdGraphNode* Node : Material->MaterialGraph->Nodes)
+	for (UEdGraphNode* Node : Graph->Nodes)
 	{
 		if (!Node) continue;
 		if (Node->NodeGuid.ToString() == NodeId)
@@ -1288,13 +1462,13 @@ FString FBlueprintMCPServer::HandleMoveMaterialExpression(const FString& Body)
 
 	if (bDryRun)
 	{
-		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: [DRY RUN] Would move node '%s' to (%d, %d) in material '%s'"),
-			*NodeId, PosX, PosY, *MaterialName);
+		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: [DRY RUN] Would move node '%s' to (%d, %d) in '%s'"),
+			*NodeId, PosX, PosY, *AssetDisplayName);
 
 		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 		Result->SetBoolField(TEXT("success"), true);
 		Result->SetBoolField(TEXT("dryRun"), true);
-		Result->SetStringField(TEXT("material"), Material->GetName());
+		Result->SetStringField(TEXT("material"), AssetDisplayName);
 		Result->SetStringField(TEXT("nodeId"), NodeId);
 		Result->SetNumberField(TEXT("posX"), PosX);
 		Result->SetNumberField(TEXT("posY"), PosY);
@@ -1312,18 +1486,19 @@ FString FBlueprintMCPServer::HandleMoveMaterialExpression(const FString& Body)
 		TargetMatNode->MaterialExpression->MaterialExpressionEditorY = PosY;
 	}
 
-	Material->PreEditChange(nullptr);
-	Material->PostEditChange();
+	UObject* Asset = Material ? (UObject*)Material : (UObject*)MatFunc;
+	Asset->PreEditChange(nullptr);
+	Asset->PostEditChange();
 
 	// Save
-	bool bSaved = SaveMaterialPackage(Material);
+	bool bSaved = Material ? SaveMaterialPackage(Material) : SaveGenericPackage(MatFunc);
 
-	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Moved node '%s' to (%d, %d) in material '%s' (saved: %s)"),
-		*NodeId, PosX, PosY, *MaterialName, bSaved ? TEXT("true") : TEXT("false"));
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Moved node '%s' to (%d, %d) in '%s' (saved: %s)"),
+		*NodeId, PosX, PosY, *AssetDisplayName, bSaved ? TEXT("true") : TEXT("false"));
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), true);
-	Result->SetStringField(TEXT("material"), Material->GetName());
+	Result->SetStringField(TEXT("material"), AssetDisplayName);
 	Result->SetStringField(TEXT("nodeId"), NodeId);
 	Result->SetNumberField(TEXT("posX"), PosX);
 	Result->SetNumberField(TEXT("posY"), PosY);

@@ -680,6 +680,8 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("diffMaterialGraph")));
 	Router->BindRoute(FHttpPath(TEXT("/api/restore-material-graph")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("restoreMaterialGraph")));
+	Router->BindRoute(FHttpPath(TEXT("/api/validate-material")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("validateMaterial")));
 
 	// Animation Blueprint tools
 	Router->BindRoute(FHttpPath(TEXT("/api/create-anim-blueprint")), EHttpServerRequestVerbs::VERB_POST,
@@ -946,6 +948,7 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("snapshotMaterialGraph"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleSnapshotMaterialGraph(B); });
 	HandlerMap.Add(TEXT("diffMaterialGraph"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleDiffMaterialGraph(B); });
 	HandlerMap.Add(TEXT("restoreMaterialGraph"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleRestoreMaterialGraph(B); });
+	HandlerMap.Add(TEXT("validateMaterial"),        [this](const TMap<FString, FString>&, const FString& B) { return HandleValidateMaterial(B); });
 
 	// Animation Blueprint handlers
 	HandlerMap.Add(TEXT("createAnimBlueprint"),     [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateAnimBlueprint(B); });

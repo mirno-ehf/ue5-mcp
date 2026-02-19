@@ -29,7 +29,8 @@ public class BlueprintMCP : ModuleRules
 			"EditorSubsystem",
 			"MaterialEditor",
 			"AnimGraph",
-			"AnimGraphRuntime"
+			"AnimGraphRuntime",
+			"RHI"
 		});
 	}
 }
