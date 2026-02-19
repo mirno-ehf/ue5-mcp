@@ -311,6 +311,118 @@ export function registerAnimationTools(server: McpServer): void {
   );
 
   // ---------------------------------------------------------------------------
+  // create_blend_space
+  // ---------------------------------------------------------------------------
+
+  server.tool(
+    "create_blend_space",
+    "Create a new 2D Blend Space asset with a target skeleton.",
+    {
+      name: z.string().describe("Blend Space name (e.g. 'BS_Locomotion')"),
+      packagePath: z.string().default("/Game").describe("Package path (e.g. '/Game/Animations')"),
+      skeleton: z.string().describe("Skeleton asset name or path. Use '__create_test_skeleton__' for testing."),
+    },
+    async ({ name, packagePath, skeleton }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await uePost("/api/create-blend-space", { name, packagePath, skeleton });
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const lines: string[] = [];
+      lines.push(`Created Blend Space: ${data.assetPath || `${packagePath}/${name}`}`);
+      lines.push(`Skeleton: ${data.skeleton || skeleton}`);
+      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+
+      lines.push(`\nNext steps:`);
+      lines.push(`  1. Use set_blend_space_samples to add animation samples at X/Y coordinates`);
+      lines.push(`  2. Use set_state_blend_space to wire it into an anim state`);
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // set_blend_space_samples
+  // ---------------------------------------------------------------------------
+
+  server.tool(
+    "set_blend_space_samples",
+    "Add animation samples to a 2D Blend Space at specific X/Y coordinates. Replaces all existing samples.",
+    {
+      blendSpace: z.string().describe("Blend Space asset name or path"),
+      axisXName: z.string().optional().describe("Display name for the X axis"),
+      axisXMin: z.number().optional().describe("Minimum value for X axis"),
+      axisXMax: z.number().optional().describe("Maximum value for X axis"),
+      axisYName: z.string().optional().describe("Display name for the Y axis"),
+      axisYMin: z.number().optional().describe("Minimum value for Y axis"),
+      axisYMax: z.number().optional().describe("Maximum value for Y axis"),
+      samples: z.array(z.object({
+        animationAsset: z.string().describe("Animation sequence asset name or path"),
+        x: z.number().describe("X coordinate in blend space"),
+        y: z.number().describe("Y coordinate in blend space"),
+      })).describe("Array of animation samples with X/Y positions"),
+    },
+    async ({ blendSpace, axisXName, axisXMin, axisXMax, axisYName, axisYMin, axisYMax, samples }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const body: Record<string, any> = { blendSpace, samples };
+      if (axisXName !== undefined) body.axisXName = axisXName;
+      if (axisXMin !== undefined) body.axisXMin = axisXMin;
+      if (axisXMax !== undefined) body.axisXMax = axisXMax;
+      if (axisYName !== undefined) body.axisYName = axisYName;
+      if (axisYMin !== undefined) body.axisYMin = axisYMin;
+      if (axisYMax !== undefined) body.axisYMax = axisYMax;
+
+      const data = await uePost("/api/set-blend-space-samples", body);
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const lines: string[] = [];
+      lines.push(`Set ${data.samplesSet ?? samples.length} samples on ${data.blendSpace || blendSpace}`);
+      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // set_state_blend_space
+  // ---------------------------------------------------------------------------
+
+  server.tool(
+    "set_state_blend_space",
+    "Place a BlendSpacePlayer node inside an anim state, connect it to the Output Animation Pose, and optionally wire X/Y input pins to named variables.",
+    {
+      blueprint: z.string().describe("Animation Blueprint name or path"),
+      graph: z.string().describe("State machine graph name"),
+      stateName: z.string().describe("State name"),
+      blendSpace: z.string().describe("Blend Space asset name or path"),
+      xVariable: z.string().optional().describe("Blueprint float variable name to wire to X input"),
+      yVariable: z.string().optional().describe("Blueprint float variable name to wire to Y input"),
+    },
+    async ({ blueprint, graph, stateName, blendSpace, xVariable, yVariable }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const body: Record<string, any> = { blueprint, graph, stateName, blendSpace };
+      if (xVariable) body.xVariable = xVariable;
+      if (yVariable) body.yVariable = yVariable;
+
+      const data = await uePost("/api/set-state-blend-space", body);
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const lines: string[] = [];
+      lines.push(`Set blend space for state "${data.stateName || stateName}"`);
+      lines.push(`Blend Space: ${data.blendSpace || blendSpace}`);
+      lines.push(`Node ID: ${data.nodeId}`);
+      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  // ---------------------------------------------------------------------------
   // list_anim_slots
   // ---------------------------------------------------------------------------
 

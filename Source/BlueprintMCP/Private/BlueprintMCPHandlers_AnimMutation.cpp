@@ -32,6 +32,7 @@
 #include "AnimationTransitionGraph.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/BlendSpace.h"
+#include "K2Node_VariableGet.h"
 
 // ============================================================
 // HandleCreateAnimBlueprint — create a new Animation Blueprint
@@ -1076,5 +1077,543 @@ FString FBlueprintMCPServer::HandleListSyncGroups(const FString& Body)
 	Result->SetStringField(TEXT("blueprint"), BlueprintName);
 	Result->SetArrayField(TEXT("syncGroups"), GroupsArr);
 	Result->SetNumberField(TEXT("count"), GroupsArr.Num());
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleCreateBlendSpace — create a new 2D Blend Space asset
+// ============================================================
+
+FString FBlueprintMCPServer::HandleCreateBlendSpace(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString Name = Json->GetStringField(TEXT("name"));
+	FString PackagePath = Json->GetStringField(TEXT("packagePath"));
+	FString SkeletonName = Json->GetStringField(TEXT("skeleton"));
+
+	if (Name.IsEmpty() || PackagePath.IsEmpty() || SkeletonName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: name, packagePath, skeleton"));
+	}
+
+	if (!PackagePath.StartsWith(TEXT("/Game")))
+	{
+		return MakeErrorJson(TEXT("packagePath must start with '/Game'"));
+	}
+
+	// Check if asset already exists
+	FString FullAssetPath = PackagePath / Name;
+	{
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FAssetData> ExistingAssets;
+		ARM.Get().GetAssetsByClass(UBlendSpace::StaticClass()->GetClassPathName(), ExistingAssets, true);
+		for (const FAssetData& Asset : ExistingAssets)
+		{
+			if (Asset.AssetName.ToString() == Name || Asset.GetObjectPathString() == FullAssetPath)
+			{
+				return MakeErrorJson(FString::Printf(
+					TEXT("Blend Space '%s' already exists. Use a different name or delete the existing asset first."),
+					*Name));
+			}
+		}
+	}
+
+	// Resolve skeleton
+	USkeleton* Skeleton = nullptr;
+
+	if (SkeletonName == TEXT("__create_test_skeleton__"))
+	{
+		FString TestSkeletonPath = PackagePath / (Name + TEXT("_TestSkeleton"));
+		UPackage* SkelPackage = CreatePackage(*TestSkeletonPath);
+		Skeleton = NewObject<USkeleton>(SkelPackage, FName(*(Name + TEXT("_TestSkeleton"))), RF_Public | RF_Standalone);
+		if (Skeleton)
+		{
+			Skeleton->MarkPackageDirty();
+			UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Created test skeleton '%s'"), *Skeleton->GetName());
+		}
+	}
+	else
+	{
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FAssetData> SkeletonAssets;
+		ARM.Get().GetAssetsByClass(USkeleton::StaticClass()->GetClassPathName(), SkeletonAssets, false);
+
+		for (const FAssetData& Asset : SkeletonAssets)
+		{
+			if (Asset.AssetName.ToString() == SkeletonName ||
+				Asset.PackageName.ToString() == SkeletonName ||
+				Asset.GetObjectPathString() == SkeletonName)
+			{
+				Skeleton = Cast<USkeleton>(Asset.GetAsset());
+				break;
+			}
+		}
+
+		// Case-insensitive fallback
+		if (!Skeleton)
+		{
+			for (const FAssetData& Asset : SkeletonAssets)
+			{
+				if (Asset.AssetName.ToString().Equals(SkeletonName, ESearchCase::IgnoreCase) ||
+					Asset.PackageName.ToString().Equals(SkeletonName, ESearchCase::IgnoreCase))
+				{
+					Skeleton = Cast<USkeleton>(Asset.GetAsset());
+					break;
+				}
+			}
+		}
+	}
+
+	if (!Skeleton)
+	{
+		return MakeErrorJson(FString::Printf(
+			TEXT("Skeleton '%s' not found. Provide the skeleton asset name or path. Use '__create_test_skeleton__' for testing."),
+			*SkeletonName));
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Creating Blend Space '%s' in '%s' with skeleton '%s'"),
+		*Name, *PackagePath, *Skeleton->GetName());
+
+	// Create the package
+	FString FullPackagePath = PackagePath / Name;
+	UPackage* Package = CreatePackage(*FullPackagePath);
+	if (!Package)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("Failed to create package at '%s'"), *FullPackagePath));
+	}
+
+	// Create the Blend Space
+	UBlendSpace* NewBS = NewObject<UBlendSpace>(Package, FName(*Name), RF_Public | RF_Standalone);
+	if (!NewBS)
+	{
+		return MakeErrorJson(TEXT("Failed to create Blend Space object"));
+	}
+
+	// Set skeleton
+	NewBS->SetSkeleton(Skeleton);
+
+	// Mark dirty and save
+	NewBS->MarkPackageDirty();
+	bool bSaved = SaveGenericPackage(NewBS);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Created Blend Space '%s' (saved: %s)"),
+		*Name, bSaved ? TEXT("true") : TEXT("false"));
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("assetPath"), FullAssetPath);
+	Result->SetStringField(TEXT("skeleton"), Skeleton->GetName());
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleSetBlendSpaceSamples — add animation samples to a Blend Space
+// ============================================================
+
+FString FBlueprintMCPServer::HandleSetBlendSpaceSamples(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlendSpaceName = Json->GetStringField(TEXT("blendSpace"));
+	if (BlendSpaceName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required field: blendSpace"));
+	}
+
+	// Load the blend space
+	UBlendSpace* BS = nullptr;
+	{
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FAssetData> BSAssets;
+		ARM.Get().GetAssetsByClass(UBlendSpace::StaticClass()->GetClassPathName(), BSAssets, true);
+		for (const FAssetData& Asset : BSAssets)
+		{
+			if (Asset.AssetName.ToString() == BlendSpaceName ||
+				Asset.PackageName.ToString() == BlendSpaceName ||
+				Asset.GetObjectPathString() == BlendSpaceName)
+			{
+				BS = Cast<UBlendSpace>(Asset.GetAsset());
+				break;
+			}
+		}
+		// Try FName-based path match (e.g. /Game/Folder/BS_Name)
+		if (!BS)
+		{
+			FString LeafName = FPaths::GetCleanFilename(BlendSpaceName);
+			for (const FAssetData& Asset : BSAssets)
+			{
+				if (Asset.AssetName.ToString() == LeafName)
+				{
+					BS = Cast<UBlendSpace>(Asset.GetAsset());
+					break;
+				}
+			}
+		}
+	}
+
+	if (!BS)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("Blend Space '%s' not found"), *BlendSpaceName));
+	}
+
+	// Set axis parameters
+	BS->PreEditChange(nullptr);
+
+	FString AxisXName = Json->GetStringField(TEXT("axisXName"));
+	FString AxisYName = Json->GetStringField(TEXT("axisYName"));
+
+	const FBlendParameter& ParamX = BS->GetBlendParameter(0);
+	const FBlendParameter& ParamY = BS->GetBlendParameter(1);
+
+	// We need to modify BlendParameters directly — use const_cast since there's no setter API
+	FBlendParameter& MutableParamX = const_cast<FBlendParameter&>(ParamX);
+	FBlendParameter& MutableParamY = const_cast<FBlendParameter&>(ParamY);
+
+	if (!AxisXName.IsEmpty()) MutableParamX.DisplayName = AxisXName;
+	if (Json->HasField(TEXT("axisXMin"))) MutableParamX.Min = (float)Json->GetNumberField(TEXT("axisXMin"));
+	if (Json->HasField(TEXT("axisXMax"))) MutableParamX.Max = (float)Json->GetNumberField(TEXT("axisXMax"));
+
+	if (!AxisYName.IsEmpty()) MutableParamY.DisplayName = AxisYName;
+	if (Json->HasField(TEXT("axisYMin"))) MutableParamY.Min = (float)Json->GetNumberField(TEXT("axisYMin"));
+	if (Json->HasField(TEXT("axisYMax"))) MutableParamY.Max = (float)Json->GetNumberField(TEXT("axisYMax"));
+
+	// Clear existing samples (delete from end to start)
+	int32 NumExisting = BS->GetNumberOfBlendSamples();
+	for (int32 i = NumExisting - 1; i >= 0; --i)
+	{
+		BS->DeleteSample(i);
+	}
+
+	// Add new samples
+	const TArray<TSharedPtr<FJsonValue>>* SamplesArray = nullptr;
+	int32 SamplesSet = 0;
+
+	if (Json->TryGetArrayField(TEXT("samples"), SamplesArray) && SamplesArray)
+	{
+		// Pre-load all animation sequences for lookup
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FAssetData> AnimAssets;
+		ARM.Get().GetAssetsByClass(UAnimSequence::StaticClass()->GetClassPathName(), AnimAssets, false);
+
+		for (const TSharedPtr<FJsonValue>& SampleVal : *SamplesArray)
+		{
+			const TSharedPtr<FJsonObject>& SampleObj = SampleVal->AsObject();
+			if (!SampleObj.IsValid()) continue;
+
+			FString AnimAssetName = SampleObj->GetStringField(TEXT("animationAsset"));
+			float X = (float)SampleObj->GetNumberField(TEXT("x"));
+			float Y = (float)SampleObj->GetNumberField(TEXT("y"));
+
+			UAnimSequence* AnimSeq = nullptr;
+			if (!AnimAssetName.IsEmpty())
+			{
+				for (const FAssetData& Asset : AnimAssets)
+				{
+					if (Asset.AssetName.ToString() == AnimAssetName ||
+						Asset.PackageName.ToString() == AnimAssetName ||
+						Asset.GetObjectPathString() == AnimAssetName)
+					{
+						AnimSeq = Cast<UAnimSequence>(Asset.GetAsset());
+						break;
+					}
+				}
+
+				// Also try extracting leaf name from path
+				if (!AnimSeq)
+				{
+					FString LeafName = FPaths::GetCleanFilename(AnimAssetName);
+					for (const FAssetData& Asset : AnimAssets)
+					{
+						if (Asset.AssetName.ToString() == LeafName)
+						{
+							AnimSeq = Cast<UAnimSequence>(Asset.GetAsset());
+							break;
+						}
+					}
+				}
+			}
+
+			FVector SampleValue(X, Y, 0.0f);
+			if (AnimSeq)
+			{
+				BS->AddSample(AnimSeq, SampleValue);
+			}
+			else
+			{
+				BS->AddSample(SampleValue);
+			}
+			SamplesSet++;
+		}
+	}
+
+	BS->ValidateSampleData();
+	BS->PostEditChange();
+
+	// Save
+	BS->MarkPackageDirty();
+	bool bSaved = SaveGenericPackage(BS);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Set %d samples on Blend Space '%s' (saved: %s)"),
+		SamplesSet, *BS->GetName(), bSaved ? TEXT("true") : TEXT("false"));
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blendSpace"), BS->GetPathName());
+	Result->SetNumberField(TEXT("samplesSet"), SamplesSet);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleSetStateBlendSpace — place a BlendSpacePlayer in a state
+// ============================================================
+
+FString FBlueprintMCPServer::HandleSetStateBlendSpace(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body"));
+	}
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString GraphName = Json->GetStringField(TEXT("graph"));
+	FString StateName = Json->GetStringField(TEXT("stateName"));
+	FString BlendSpaceName = Json->GetStringField(TEXT("blendSpace"));
+	FString XVariable = Json->GetStringField(TEXT("xVariable"));
+	FString YVariable = Json->GetStringField(TEXT("yVariable"));
+
+	if (BlueprintName.IsEmpty() || GraphName.IsEmpty() || StateName.IsEmpty() || BlendSpaceName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, graph, stateName, blendSpace"));
+	}
+
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP) return MakeErrorJson(LoadError);
+
+	UAnimBlueprint* AnimBP = Cast<UAnimBlueprint>(BP);
+	if (!AnimBP)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("'%s' is not an Animation Blueprint"), *BlueprintName));
+	}
+
+	UAnimationStateMachineGraph* SMGraph = FindStateMachineGraph(BP, GraphName);
+	if (!SMGraph)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("State machine graph '%s' not found"), *GraphName));
+	}
+
+	UAnimStateNode* StateNode = FindStateByName(SMGraph, StateName);
+	if (!StateNode)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("State '%s' not found in graph '%s'"), *StateName, *GraphName));
+	}
+
+	UEdGraph* InnerGraph = StateNode->GetBoundGraph();
+	if (!InnerGraph)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("State '%s' has no bound graph"), *StateName));
+	}
+
+	// Find the blend space asset
+	UBlendSpace* BlendSpaceAsset = nullptr;
+	{
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FAssetData> BSAssets;
+		ARM.Get().GetAssetsByClass(UBlendSpace::StaticClass()->GetClassPathName(), BSAssets, true);
+		for (const FAssetData& Asset : BSAssets)
+		{
+			if (Asset.AssetName.ToString() == BlendSpaceName ||
+				Asset.PackageName.ToString() == BlendSpaceName ||
+				Asset.GetObjectPathString() == BlendSpaceName)
+			{
+				BlendSpaceAsset = Cast<UBlendSpace>(Asset.GetAsset());
+				break;
+			}
+		}
+		// Leaf name fallback
+		if (!BlendSpaceAsset)
+		{
+			FString LeafName = FPaths::GetCleanFilename(BlendSpaceName);
+			for (const FAssetData& Asset : BSAssets)
+			{
+				if (Asset.AssetName.ToString() == LeafName)
+				{
+					BlendSpaceAsset = Cast<UBlendSpace>(Asset.GetAsset());
+					break;
+				}
+			}
+		}
+	}
+
+	if (!BlendSpaceAsset)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("Blend Space '%s' not found"), *BlendSpaceName));
+	}
+
+	// Find existing BlendSpacePlayer or create one
+	UAnimGraphNode_BlendSpacePlayer* BSNode = nullptr;
+	for (UEdGraphNode* Node : InnerGraph->Nodes)
+	{
+		BSNode = Cast<UAnimGraphNode_BlendSpacePlayer>(Node);
+		if (BSNode) break;
+	}
+
+	if (!BSNode)
+	{
+		BSNode = NewObject<UAnimGraphNode_BlendSpacePlayer>(InnerGraph);
+		BSNode->CreateNewGuid();
+		BSNode->PostPlacedNewNode();
+		BSNode->AllocateDefaultPins();
+		BSNode->NodePosX = 0;
+		BSNode->NodePosY = 0;
+		InnerGraph->AddNode(BSNode, false, false);
+	}
+
+	BSNode->SetAnimationAsset(BlendSpaceAsset);
+
+	// Connect BlendSpacePlayer output to the Output Animation Pose node
+	{
+		// Find the AnimGraphNode_Root (Output Pose) in the inner graph
+		UEdGraphNode* ResultNode = nullptr;
+		for (UEdGraphNode* Node : InnerGraph->Nodes)
+		{
+			if (Node->GetClass()->GetName().Contains(TEXT("AnimGraphNode_Root")) ||
+				Node->GetClass()->GetName().Contains(TEXT("AnimGraphNode_StateResult")))
+			{
+				ResultNode = Node;
+				break;
+			}
+		}
+
+		if (ResultNode)
+		{
+			// Find output pose pin on BlendSpacePlayer and input pose pin on result node
+			UEdGraphPin* BSOutputPin = nullptr;
+			for (UEdGraphPin* Pin : BSNode->Pins)
+			{
+				if (Pin && Pin->Direction == EGPD_Output && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct)
+				{
+					BSOutputPin = Pin;
+					break;
+				}
+			}
+
+			UEdGraphPin* ResultInputPin = nullptr;
+			for (UEdGraphPin* Pin : ResultNode->Pins)
+			{
+				if (Pin && Pin->Direction == EGPD_Input && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct)
+				{
+					ResultInputPin = Pin;
+					break;
+				}
+			}
+
+			if (BSOutputPin && ResultInputPin)
+			{
+				// Break existing connections on the result input
+				ResultInputPin->BreakAllPinLinks();
+				const UEdGraphSchema* Schema = InnerGraph->GetSchema();
+				if (Schema)
+				{
+					Schema->TryCreateConnection(BSOutputPin, ResultInputPin);
+				}
+			}
+		}
+	}
+
+	// Wire X and Y variables if provided
+	auto WireVariable = [&](const FString& VarName, const FString& PinName) -> bool
+	{
+		if (VarName.IsEmpty()) return false;
+
+		// Verify the variable exists in the blueprint
+		FName VarFName(*VarName);
+		bool bVarFound = false;
+		for (FBPVariableDescription& Var : BP->NewVariables)
+		{
+			if (Var.VarName == VarFName)
+			{
+				bVarFound = true;
+				break;
+			}
+		}
+		if (!bVarFound)
+		{
+			// Also check parent class properties
+			if (UClass* GenClass = BP->SkeletonGeneratedClass)
+			{
+				if (FProperty* Prop = GenClass->FindPropertyByName(VarFName))
+				{
+					bVarFound = true;
+				}
+			}
+		}
+		if (!bVarFound)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("BlueprintMCP: Variable '%s' not found in '%s', skipping wire"),
+				*VarName, *BlueprintName);
+			return false;
+		}
+
+		// Create a VariableGet node
+		UK2Node_VariableGet* GetNode = NewObject<UK2Node_VariableGet>(InnerGraph);
+		GetNode->VariableReference.SetSelfMember(VarFName);
+		GetNode->NodePosX = BSNode->NodePosX - 250;
+		GetNode->NodePosY = BSNode->NodePosY;
+		InnerGraph->AddNode(GetNode, false, false);
+		GetNode->AllocateDefaultPins();
+
+		// Find the variable output pin
+		UEdGraphPin* VarOutPin = nullptr;
+		for (UEdGraphPin* Pin : GetNode->Pins)
+		{
+			if (Pin && Pin->Direction == EGPD_Output && Pin->PinName == VarFName)
+			{
+				VarOutPin = Pin;
+				break;
+			}
+		}
+
+		// Find the target pin on the BlendSpacePlayer
+		UEdGraphPin* TargetPin = BSNode->FindPin(FName(*PinName));
+
+		if (VarOutPin && TargetPin)
+		{
+			const UEdGraphSchema* Schema = InnerGraph->GetSchema();
+			if (Schema)
+			{
+				Schema->TryCreateConnection(VarOutPin, TargetPin);
+				return true;
+			}
+		}
+
+		return false;
+	};
+
+	WireVariable(XVariable, TEXT("X"));
+	WireVariable(YVariable, TEXT("Y"));
+
+	// Compile and save
+	FKismetEditorUtilities::CompileBlueprint(AnimBP);
+	bool bSaved = SaveBlueprintPackage(AnimBP);
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("stateName"), StateName);
+	Result->SetStringField(TEXT("blendSpace"), BlendSpaceAsset->GetName());
+	Result->SetStringField(TEXT("nodeId"), BSNode->NodeGuid.ToString());
+	Result->SetBoolField(TEXT("saved"), bSaved);
 	return JsonToString(Result);
 }
