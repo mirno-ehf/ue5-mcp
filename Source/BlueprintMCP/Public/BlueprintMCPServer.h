@@ -268,6 +268,9 @@ private:
 	FString HandleSetStateAnimation(const FString& Body);
 	FString HandleListAnimSlots(const FString& Body);
 	FString HandleListSyncGroups(const FString& Body);
+	FString HandleCreateBlendSpace(const FString& Body);
+	FString HandleSetBlendSpaceSamples(const FString& Body);
+	FString HandleSetStateBlendSpace(const FString& Body);
 
 	// ----- Serialization -----
 	TSharedRef<FJsonObject> SerializeBlueprint(UBlueprint* BP);

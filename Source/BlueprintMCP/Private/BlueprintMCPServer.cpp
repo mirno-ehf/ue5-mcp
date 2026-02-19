@@ -781,6 +781,12 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("listAnimSlots")));
 	Router->BindRoute(FHttpPath(TEXT("/api/list-sync-groups")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("listSyncGroups")));
+	Router->BindRoute(FHttpPath(TEXT("/api/create-blend-space")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("createBlendSpace")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-blend-space-samples")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setBlendSpaceSamples")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-state-blend-space")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setStateBlendSpace")));
 
 	// Register TMap dispatch handlers
 	RegisterHandlers();
@@ -1038,6 +1044,9 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("setStateAnimation"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleSetStateAnimation(B); });
 	HandlerMap.Add(TEXT("listAnimSlots"),           [this](const TMap<FString, FString>&, const FString& B) { return HandleListAnimSlots(B); });
 	HandlerMap.Add(TEXT("listSyncGroups"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleListSyncGroups(B); });
+	HandlerMap.Add(TEXT("createBlendSpace"),        [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateBlendSpace(B); });
+	HandlerMap.Add(TEXT("setBlendSpaceSamples"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleSetBlendSpaceSamples(B); });
+	HandlerMap.Add(TEXT("setStateBlendSpace"),      [this](const TMap<FString, FString>&, const FString& B) { return HandleSetStateBlendSpace(B); });
 }
 
 // ============================================================
