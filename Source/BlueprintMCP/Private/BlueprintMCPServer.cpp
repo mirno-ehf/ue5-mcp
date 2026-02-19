@@ -1,4 +1,5 @@
 #include "BlueprintMCPServer.h"
+#include "Materials/MaterialExpression.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Engine/Blueprint.h"
@@ -351,6 +352,82 @@ int32 TryRefreshAllNodesSEH(UBlueprint* BP)
 	}
 	__except (1)
 	{
+		return -1;
+	}
+}
+
+// Inner: create expression, register in material, and trigger PostEditChange.
+// All of this may crash for classes that are effectively abstract.
+static void AddMaterialExpressionInner(
+	UObject* Owner, UClass* ExprClass, UMaterial* Material, UMaterialFunction* MatFunc,
+	int32 PosX, int32 PosY, UMaterialExpression** OutExpr)
+{
+	*OutExpr = NewObject<UMaterialExpression>(Owner, ExprClass);
+	if (!*OutExpr) return;
+
+	(*OutExpr)->MaterialExpressionEditorX = PosX;
+	(*OutExpr)->MaterialExpressionEditorY = PosY;
+
+	if (Material)
+	{
+		Material->GetExpressionCollection().AddExpression(*OutExpr);
+		if (Material->MaterialGraph)
+		{
+			Material->MaterialGraph->RebuildGraph();
+		}
+		Material->PreEditChange(nullptr);
+		Material->PostEditChange();
+		Material->MarkPackageDirty();
+	}
+	else if (MatFunc)
+	{
+		MatFunc->GetExpressionCollection().AddExpression(*OutExpr);
+		MatFunc->PreEditChange(nullptr);
+		MatFunc->PostEditChange();
+		MatFunc->MarkPackageDirty();
+	}
+}
+
+// Inner: remove a bad expression from a material after a crash
+static void CleanupBadExpressionInner(UMaterial* Material, UMaterialFunction* MatFunc, UMaterialExpression* BadExpr)
+{
+	if (!BadExpr) return;
+	if (Material)
+	{
+		Material->GetExpressionCollection().RemoveExpression(BadExpr);
+		if (Material->MaterialGraph)
+		{
+			Material->MaterialGraph->RebuildGraph();
+		}
+	}
+	else if (MatFunc)
+	{
+		MatFunc->GetExpressionCollection().RemoveExpression(BadExpr);
+	}
+	BadExpr->MarkAsGarbage();
+}
+
+int32 TryAddMaterialExpressionSEH(
+	UObject* Owner, UClass* ExprClass, UMaterial* Material, UMaterialFunction* MatFunc,
+	int32 PosX, int32 PosY, UMaterialExpression** OutExpr)
+{
+	__try
+	{
+		AddMaterialExpressionInner(Owner, ExprClass, Material, MatFunc, PosX, PosY, OutExpr);
+		return 0;
+	}
+	__except (1)
+	{
+		// Try to clean up the partially-added expression
+		__try
+		{
+			CleanupBadExpressionInner(Material, MatFunc, *OutExpr);
+		}
+		__except (1)
+		{
+			// Cleanup also crashed — nothing more we can do
+		}
+		*OutExpr = nullptr;
 		return -1;
 	}
 }
@@ -1669,6 +1746,23 @@ FAssetData* FBlueprintMCPServer::FindMaterialAsset(const FString& NameOrPath)
 			return &Asset;
 	}
 	return nullptr;
+}
+
+void FBlueprintMCPServer::EnsureMaterialGraph(UMaterial* Material)
+{
+	if (!Material) return;
+	if (!Material->MaterialGraph)
+	{
+		// In commandlet/headless mode the MaterialGraph is not auto-created.
+		// Replicate what the Material Editor does on open (MaterialEditor.cpp:619).
+		Material->MaterialGraph = CastChecked<UMaterialGraph>(
+			FBlueprintEditorUtils::CreateNewGraph(
+				Material, NAME_None,
+				UMaterialGraph::StaticClass(),
+				UMaterialGraphSchema::StaticClass()));
+		Material->MaterialGraph->Material = Material;
+		Material->MaterialGraph->RebuildGraph();
+	}
 }
 
 UMaterial* FBlueprintMCPServer::LoadMaterialByName(const FString& NameOrPath, FString& OutError)

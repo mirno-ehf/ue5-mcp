@@ -765,7 +765,7 @@ FString FBlueprintMCPServer::HandleFindMaterialReferences(const FString& Body)
 	Result->SetBoolField(TEXT("success"), true);
 	Result->SetStringField(TEXT("material"), MaterialName);
 	Result->SetStringField(TEXT("packagePath"), PackagePath);
-	Result->SetNumberField(TEXT("referencerCount"), RefArray.Num());
+	Result->SetNumberField(TEXT("totalReferencers"), RefArray.Num());
 	Result->SetArrayField(TEXT("referencers"), RefArray);
 	return JsonToString(Result);
 }
