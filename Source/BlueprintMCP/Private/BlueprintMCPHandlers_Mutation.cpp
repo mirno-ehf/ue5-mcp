@@ -1,5 +1,8 @@
 #include "BlueprintMCPServer.h"
 #include "Engine/Blueprint.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "Materials/MaterialFunction.h"
 #include "Engine/World.h"
 #include "Engine/LevelScriptBlueprint.h"
 #include "EdGraph/EdGraph.h"
@@ -1961,10 +1964,10 @@ FString FBlueprintMCPServer::HandleRenameAsset(const FString& Body)
 	TArray<FAssetRenameData> RenameData;
 
 	// We need to load the asset to get the object
-	FAssetData* FoundAsset = FindBlueprintAsset(AssetPath);
+	FAssetData* FoundAsset = FindAnyAsset(AssetPath);
 	if (!FoundAsset)
 	{
-		return MakeErrorJson(FString::Printf(TEXT("Asset '%s' not found in indexed blueprints"), *AssetPath));
+		return MakeErrorJson(FString::Printf(TEXT("Asset '%s' not found. Checked Blueprints, Materials, Material Instances, and Material Functions."), *AssetPath));
 	}
 
 	UObject* AssetObj = FoundAsset->GetAsset();
@@ -2000,10 +2003,16 @@ FString FBlueprintMCPServer::HandleRenameAsset(const FString& Body)
 
 	if (bSuccess)
 	{
-		// Update our cached asset list — re-scan to pick up the new path
+		// Update all cached asset lists — re-scan to pick up the new path
 		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 		AllBlueprintAssets.Empty();
 		ARM.Get().GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), AllBlueprintAssets, true);
+		AllMaterialAssets.Empty();
+		ARM.Get().GetAssetsByClass(UMaterial::StaticClass()->GetClassPathName(), AllMaterialAssets, true);
+		AllMaterialInstanceAssets.Empty();
+		ARM.Get().GetAssetsByClass(UMaterialInstanceConstant::StaticClass()->GetClassPathName(), AllMaterialInstanceAssets, true);
+		AllMaterialFunctionAssets.Empty();
+		ARM.Get().GetAssetsByClass(UMaterialFunction::StaticClass()->GetClassPathName(), AllMaterialFunctionAssets, true);
 	}
 
 	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Rename %s"), bSuccess ? TEXT("succeeded") : TEXT("failed"));

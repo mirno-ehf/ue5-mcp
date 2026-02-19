@@ -118,6 +118,9 @@ private:
 	bool bRunning = false;
 	bool bIsEditor = false;
 
+	// ----- Asset registry rescan -----
+	FString HandleRescan();
+
 	// ----- Request handlers (read-only) -----
 	FString HandleList(const TMap<FString, FString>& Params);
 	FString HandleGetBlueprint(const TMap<FString, FString>& Params);
@@ -272,6 +275,7 @@ private:
 	FString JsonToString(TSharedRef<FJsonObject> JsonObj);
 
 	// ----- Helpers -----
+	FAssetData* FindAnyAsset(const FString& NameOrPath);
 	FAssetData* FindBlueprintAsset(const FString& NameOrPath);
 	FAssetData* FindMapAsset(const FString& NameOrPath);
 	UBlueprint* LoadBlueprintByName(const FString& NameOrPath, FString& OutError);

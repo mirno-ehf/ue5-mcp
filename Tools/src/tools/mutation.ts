@@ -426,9 +426,9 @@ export function registerMutationTools(server: McpServer): void {
 
   server.tool(
     "rename_asset",
-    "Rename or move a Blueprint asset and update all references.",
+    "Rename or move an asset (Blueprint, Material, Material Instance, or Material Function) and update all references.",
     {
-      assetPath: z.string().describe("Current full asset path (e.g. '/Game/Blueprints/Old/BP_MyActor')"),
+      assetPath: z.string().describe("Current full asset path (e.g. '/Game/Blueprints/Old/BP_MyActor' or '/Game/Materials/MI_Skin')"),
       newPath: z.string().describe("New full asset path (e.g. '/Game/Blueprints/New/BP_MyRenamedActor')"),
     },
     async ({ assetPath, newPath }) => {

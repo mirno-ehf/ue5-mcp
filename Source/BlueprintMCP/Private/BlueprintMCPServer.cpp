@@ -107,6 +107,18 @@ FString FBlueprintMCPServer::JsonToString(TSharedRef<FJsonObject> JsonObj)
 	return Output;
 }
 
+FAssetData* FBlueprintMCPServer::FindAnyAsset(const FString& NameOrPath)
+{
+	FAssetData* Asset = FindBlueprintAsset(NameOrPath);
+	if (!Asset)
+		Asset = FindMaterialAsset(NameOrPath);
+	if (!Asset)
+		Asset = FindMaterialInstanceAsset(NameOrPath);
+	if (!Asset)
+		Asset = FindMaterialFunctionAsset(NameOrPath);
+	return Asset;
+}
+
 FAssetData* FBlueprintMCPServer::FindBlueprintAsset(const FString& NameOrPath)
 {
 	for (FAssetData& Asset : AllBlueprintAssets)
@@ -448,6 +460,10 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 				OnComplete(MoveTemp(R));
 				return true;
 			}));
+
+	// /api/rescan — re-scan asset registry and refresh cached asset lists (game thread)
+	Router->BindRoute(FHttpPath(TEXT("/api/rescan")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("rescan")));
 
 	// /api/list — answered directly (only reads immutable asset list)
 	Router->BindRoute(FHttpPath(TEXT("/api/list")), EHttpServerRequestVerbs::VERB_GET,
@@ -848,6 +864,9 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("testSave"),          [this](const TMap<FString, FString>& P, const FString&) { return HandleTestSave(P); });
 	HandlerMap.Add(TEXT("searchByType"),      [this](const TMap<FString, FString>& P, const FString&) { return HandleSearchByType(P); });
 
+	// Rescan handler (game thread, no body needed)
+	HandlerMap.Add(TEXT("rescan"), [this](const TMap<FString, FString>&, const FString&) { return HandleRescan(); });
+
 	// POST handlers (use Body, ignore QueryParams)
 	HandlerMap.Add(TEXT("replaceFunctionCalls"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleReplaceFunctionCalls(B); });
 	HandlerMap.Add(TEXT("changeVariableType"),      [this](const TMap<FString, FString>&, const FString& B) { return HandleChangeVariableType(B); });
@@ -939,6 +958,61 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("setStateAnimation"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleSetStateAnimation(B); });
 	HandlerMap.Add(TEXT("listAnimSlots"),           [this](const TMap<FString, FString>&, const FString& B) { return HandleListAnimSlots(B); });
 	HandlerMap.Add(TEXT("listSyncGroups"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleListSyncGroups(B); });
+}
+
+// ============================================================
+// HandleRescan — refresh cached asset lists from asset registry
+// ============================================================
+
+FString FBlueprintMCPServer::HandleRescan()
+{
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Rescanning asset registry..."));
+
+	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	ARM.Get().SearchAllAssets(true);
+
+	int32 OldBP = AllBlueprintAssets.Num();
+	int32 OldMap = AllMapAssets.Num();
+	int32 OldMat = AllMaterialAssets.Num();
+	int32 OldMI = AllMaterialInstanceAssets.Num();
+	int32 OldMF = AllMaterialFunctionAssets.Num();
+
+	AllBlueprintAssets.Empty();
+	AllMapAssets.Empty();
+	AllMaterialAssets.Empty();
+	AllMaterialInstanceAssets.Empty();
+	AllMaterialFunctionAssets.Empty();
+
+	ARM.Get().GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), AllBlueprintAssets, true);
+	ARM.Get().GetAssetsByClass(UWorld::StaticClass()->GetClassPathName(), AllMapAssets, false);
+	ARM.Get().GetAssetsByClass(UMaterial::StaticClass()->GetClassPathName(), AllMaterialAssets, false);
+	ARM.Get().GetAssetsByClass(UMaterialInstanceConstant::StaticClass()->GetClassPathName(), AllMaterialInstanceAssets, false);
+	ARM.Get().GetAssetsByClass(UMaterialFunction::StaticClass()->GetClassPathName(), AllMaterialFunctionAssets, false);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Rescan complete — BP %d→%d, Map %d→%d, Mat %d→%d, MI %d→%d, MF %d→%d"),
+		OldBP, AllBlueprintAssets.Num(),
+		OldMap, AllMapAssets.Num(),
+		OldMat, AllMaterialAssets.Num(),
+		OldMI, AllMaterialInstanceAssets.Num(),
+		OldMF, AllMaterialFunctionAssets.Num());
+
+	TSharedRef<FJsonObject> J = MakeShared<FJsonObject>();
+	J->SetStringField(TEXT("status"), TEXT("ok"));
+	J->SetNumberField(TEXT("blueprintCount"), AllBlueprintAssets.Num());
+	J->SetNumberField(TEXT("mapCount"), AllMapAssets.Num());
+	J->SetNumberField(TEXT("materialCount"), AllMaterialAssets.Num());
+	J->SetNumberField(TEXT("materialInstanceCount"), AllMaterialInstanceAssets.Num());
+	J->SetNumberField(TEXT("materialFunctionCount"), AllMaterialFunctionAssets.Num());
+
+	TSharedRef<FJsonObject> Delta = MakeShared<FJsonObject>();
+	Delta->SetNumberField(TEXT("blueprints"), AllBlueprintAssets.Num() - OldBP);
+	Delta->SetNumberField(TEXT("maps"), AllMapAssets.Num() - OldMap);
+	Delta->SetNumberField(TEXT("materials"), AllMaterialAssets.Num() - OldMat);
+	Delta->SetNumberField(TEXT("materialInstances"), AllMaterialInstanceAssets.Num() - OldMI);
+	Delta->SetNumberField(TEXT("materialFunctions"), AllMaterialFunctionAssets.Num() - OldMF);
+	J->SetObjectField(TEXT("delta"), Delta);
+
+	return JsonToString(J);
 }
 
 // ============================================================
