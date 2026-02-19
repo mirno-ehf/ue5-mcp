@@ -289,6 +289,8 @@ private:
 	static FString UrlDecode(const FString& EncodedString);
 
 	// ----- Material helpers -----
+	/** Ensure that Material->MaterialGraph exists (creates it on demand for commandlet mode). */
+	void EnsureMaterialGraph(UMaterial* Material);
 	FAssetData* FindMaterialAsset(const FString& NameOrPath);
 	UMaterial* LoadMaterialByName(const FString& NameOrPath, FString& OutError);
 	FAssetData* FindMaterialInstanceAsset(const FString& NameOrPath);

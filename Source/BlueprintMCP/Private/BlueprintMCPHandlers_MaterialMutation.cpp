@@ -38,6 +38,15 @@
 #include "UObject/UObjectIterator.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 
+// SEH wrapper defined in BlueprintMCPServer.cpp — catches crashes from abstract/invalid expression classes.
+// Wraps the entire creation + registration + PostEditChange flow so that if the expression crashes
+// (e.g. UMaterialExpressionParameter), it cleans up and returns -1 instead of terminating the process.
+#if PLATFORM_WINDOWS
+extern int32 TryAddMaterialExpressionSEH(
+	UObject* Owner, UClass* ExprClass, UMaterial* Material, UMaterialFunction* MatFunc,
+	int32 PosX, int32 PosY, UMaterialExpression** OutExpr);
+#endif
+
 // ============================================================
 // Phase 2: Material Mutations
 // ============================================================
@@ -606,18 +615,29 @@ FString FBlueprintMCPServer::HandleAddMaterialExpression(const FString& Body)
 		return JsonToString(Result);
 	}
 
-	// Create the expression
-	UMaterialExpression* NewExpr = NewObject<UMaterialExpression>(Owner, ExprClass);
+	// Ensure the MaterialGraph exists (commandlet mode doesn't auto-create it)
+	if (Material) EnsureMaterialGraph(Material);
+
+	// Create, register, and PostEditChange the expression — all inside an SEH wrapper because
+	// some classes (e.g. UMaterialExpressionParameter) lack CLASS_Abstract but crash during
+	// PostEditChange. The SEH wrapper cleans up the bad expression on crash.
+	UMaterialExpression* NewExpr = nullptr;
+#if PLATFORM_WINDOWS
+	int32 CreateResult = TryAddMaterialExpressionSEH(Owner, ExprClass, Material, MatFunc, PosX, PosY, &NewExpr);
+	if (CreateResult != 0 || !NewExpr)
+	{
+		return MakeErrorJson(FString::Printf(
+			TEXT("Expression class '%s' cannot be instantiated (may be abstract or have internal errors)."),
+			*ExpressionClassName));
+	}
+#else
+	NewExpr = NewObject<UMaterialExpression>(Owner, ExprClass);
 	if (!NewExpr)
 	{
 		return MakeErrorJson(TEXT("Failed to create material expression object"));
 	}
-
-	// Set position
 	NewExpr->MaterialExpressionEditorX = PosX;
 	NewExpr->MaterialExpressionEditorY = PosY;
-
-	// Add to material or material function
 	if (Material)
 	{
 		Material->GetExpressionCollection().AddExpression(NewExpr);
@@ -636,6 +656,7 @@ FString FBlueprintMCPServer::HandleAddMaterialExpression(const FString& Body)
 		MatFunc->PostEditChange();
 		MatFunc->MarkPackageDirty();
 	}
+#endif
 
 	// Save
 	bool bSaved = Material ? SaveMaterialPackage(Material) : SaveGenericPackage(MatFunc);
@@ -725,6 +746,7 @@ FString FBlueprintMCPServer::HandleDeleteMaterialExpression(const FString& Body)
 	}
 
 	// For materials, we need the graph to find nodes by GUID
+	if (Material) EnsureMaterialGraph(Material);
 	UEdGraph* Graph = Material ? (UEdGraph*)Material->MaterialGraph : (MatFunc ? MatFunc->MaterialGraph : nullptr);
 	if (!Graph)
 	{
@@ -859,6 +881,7 @@ FString FBlueprintMCPServer::HandleConnectMaterialPins(const FString& Body)
 		AssetDisplayName = Material->GetName();
 	}
 
+	if (Material) EnsureMaterialGraph(Material);
 	UEdGraph* Graph = Material ? (UEdGraph*)Material->MaterialGraph : (MatFunc ? MatFunc->MaterialGraph : nullptr);
 	if (!Graph)
 	{
@@ -1022,6 +1045,7 @@ FString FBlueprintMCPServer::HandleDisconnectMaterialPin(const FString& Body)
 		AssetDisplayName = Material->GetName();
 	}
 
+	if (Material) EnsureMaterialGraph(Material);
 	UEdGraph* Graph = Material ? (UEdGraph*)Material->MaterialGraph : (MatFunc ? MatFunc->MaterialGraph : nullptr);
 	if (!Graph)
 	{
@@ -1153,6 +1177,7 @@ FString FBlueprintMCPServer::HandleSetExpressionValue(const FString& Body)
 		AssetDisplayName = Material->GetName();
 	}
 
+	if (Material) EnsureMaterialGraph(Material);
 	UEdGraph* Graph = Material ? (UEdGraph*)Material->MaterialGraph : (MatFunc ? MatFunc->MaterialGraph : nullptr);
 	if (!Graph)
 	{
@@ -1437,6 +1462,7 @@ FString FBlueprintMCPServer::HandleMoveMaterialExpression(const FString& Body)
 		AssetDisplayName = Material->GetName();
 	}
 
+	if (Material) EnsureMaterialGraph(Material);
 	UEdGraph* Graph = Material ? (UEdGraph*)Material->MaterialGraph : (MatFunc ? MatFunc->MaterialGraph : nullptr);
 	if (!Graph)
 	{
@@ -1624,6 +1650,7 @@ FString FBlueprintMCPServer::HandleSnapshotMaterialGraph(const FString& Body)
 		return MakeErrorJson(LoadError);
 	}
 
+	EnsureMaterialGraph(Material);
 	if (!Material->MaterialGraph)
 	{
 		return MakeErrorJson(FString::Printf(TEXT("Material '%s' has no material graph"), *MaterialName));
@@ -1730,6 +1757,7 @@ FString FBlueprintMCPServer::HandleDiffMaterialGraph(const FString& Body)
 		return MakeErrorJson(LoadError);
 	}
 
+	EnsureMaterialGraph(Material);
 	if (!Material->MaterialGraph)
 	{
 		return MakeErrorJson(FString::Printf(TEXT("Material '%s' has no material graph"), *MaterialName));
@@ -1904,6 +1932,7 @@ FString FBlueprintMCPServer::HandleRestoreMaterialGraph(const FString& Body)
 		return MakeErrorJson(LoadError);
 	}
 
+	EnsureMaterialGraph(Material);
 	if (!Material->MaterialGraph)
 	{
 		return MakeErrorJson(FString::Printf(TEXT("Material '%s' has no material graph"), *MaterialName));
