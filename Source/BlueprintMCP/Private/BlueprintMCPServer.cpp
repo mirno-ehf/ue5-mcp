@@ -788,6 +788,42 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/set-state-blend-space")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("setStateBlendSpace")));
 
+	// Widget Blueprint tools
+	Router->BindRoute(FHttpPath(TEXT("/api/list-widget-tree")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("listWidgetTree")));
+	Router->BindRoute(FHttpPath(TEXT("/api/get-widget-properties")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("getWidgetProperties")));
+	Router->BindRoute(FHttpPath(TEXT("/api/add-widget")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("addWidget")));
+	Router->BindRoute(FHttpPath(TEXT("/api/remove-widget")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("removeWidget")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-widget-property")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setWidgetProperty")));
+	Router->BindRoute(FHttpPath(TEXT("/api/move-widget")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("moveWidget")));
+	Router->BindRoute(FHttpPath(TEXT("/api/create-widget-blueprint")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("createWidgetBlueprint")));
+
+	// Level actor tools (read)
+	Router->BindRoute(FHttpPath(TEXT("/api/current-level")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("current-level")));
+	Router->BindRoute(FHttpPath(TEXT("/api/list-actors")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("list-actors")));
+	Router->BindRoute(FHttpPath(TEXT("/api/actor-properties")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("actor-properties")));
+	Router->BindRoute(FHttpPath(TEXT("/api/selected-actors")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("selected-actors")));
+
+	// Level actor tools (write)
+	Router->BindRoute(FHttpPath(TEXT("/api/set-actor-transform")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("set-actor-transform")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-actor-property")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("set-actor-property")));
+	Router->BindRoute(FHttpPath(TEXT("/api/spawn-actor")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("spawn-actor")));
+	Router->BindRoute(FHttpPath(TEXT("/api/delete-actor")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("delete-actor")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -851,16 +887,22 @@ bool FBlueprintMCPServer::ProcessOneRequest()
 	FString Response;
 	if (FRequestHandler* Handler = HandlerMap.Find(Req->Endpoint))
 	{
-		// Wrap mutation endpoints in an undo transaction so users can Ctrl+Z
+		// Wrap mutation endpoints in an undo transaction so users can Ctrl+Z.
+		// Widget Blueprint mutations are EXCLUDED because BP recompilation creates
+		// REINST_ objects whose WidgetTree references get trapped in the TransBuffer,
+		// preventing the old World from being garbage-collected (fatal "World Leak"
+		// crash in ReferenceChainSearch.cpp). Widget tools use snapshot/restore instead.
 		const bool bIsMutation = MutationEndpoints.Contains(Req->Endpoint);
-		if (bIsMutation && GEditor)
+		const bool bIsWidgetMutation = WidgetMutationEndpoints.Contains(Req->Endpoint);
+		const bool bUseTransaction = bIsMutation && !bIsWidgetMutation && GEditor != nullptr;
+		if (bUseTransaction)
 		{
 			GEditor->BeginTransaction(FText::FromString(FString::Printf(TEXT("BlueprintMCP: %s"), *Req->Endpoint)));
 		}
 
 		Response = (*Handler)(Req->QueryParams, Req->Body);
 
-		if (bIsMutation && GEditor)
+		if (bUseTransaction)
 		{
 			GEditor->EndTransaction();
 		}
@@ -939,6 +981,27 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("addAnimNode"),
 		TEXT("addStateMachine"),
 		TEXT("setStateAnimation"),
+		TEXT("addWidget"),
+		TEXT("removeWidget"),
+		TEXT("setWidgetProperty"),
+		TEXT("moveWidget"),
+		TEXT("createWidgetBlueprint"),
+		// Level actor mutations
+		TEXT("set-actor-transform"),
+		TEXT("set-actor-property"),
+		TEXT("spawn-actor"),
+		TEXT("delete-actor"),
+	};
+
+	// Widget mutations that must NOT be wrapped in undo transactions.
+	// Recompilation of Widget Blueprints creates REINST_ objects whose
+	// WidgetTree refs in the TransBuffer prevent World GC → fatal crash.
+	WidgetMutationEndpoints = {
+		TEXT("addWidget"),
+		TEXT("removeWidget"),
+		TEXT("setWidgetProperty"),
+		TEXT("moveWidget"),
+		TEXT("createWidgetBlueprint"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -1047,6 +1110,25 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("createBlendSpace"),        [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateBlendSpace(B); });
 	HandlerMap.Add(TEXT("setBlendSpaceSamples"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleSetBlendSpaceSamples(B); });
 	HandlerMap.Add(TEXT("setStateBlendSpace"),      [this](const TMap<FString, FString>&, const FString& B) { return HandleSetStateBlendSpace(B); });
+
+	// Widget Blueprint handlers
+	HandlerMap.Add(TEXT("listWidgetTree"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleListWidgetTree(B); });
+	HandlerMap.Add(TEXT("getWidgetProperties"),     [this](const TMap<FString, FString>&, const FString& B) { return HandleGetWidgetProperties(B); });
+	HandlerMap.Add(TEXT("addWidget"),               [this](const TMap<FString, FString>&, const FString& B) { return HandleAddWidget(B); });
+	HandlerMap.Add(TEXT("removeWidget"),            [this](const TMap<FString, FString>&, const FString& B) { return HandleRemoveWidget(B); });
+	HandlerMap.Add(TEXT("setWidgetProperty"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleSetWidgetProperty(B); });
+	HandlerMap.Add(TEXT("moveWidget"),              [this](const TMap<FString, FString>&, const FString& B) { return HandleMoveWidget(B); });
+	HandlerMap.Add(TEXT("createWidgetBlueprint"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateWidgetBlueprint(B); });
+
+	// Level actor handlers
+	HandlerMap.Add(TEXT("current-level"),       [this](const TMap<FString, FString>& P, const FString& B) { return HandleGetCurrentLevel(P, B); });
+	HandlerMap.Add(TEXT("list-actors"),         [this](const TMap<FString, FString>& P, const FString& B) { return HandleListActors(P, B); });
+	HandlerMap.Add(TEXT("actor-properties"),    [this](const TMap<FString, FString>& P, const FString& B) { return HandleGetActorProperties(P, B); });
+	HandlerMap.Add(TEXT("selected-actors"),     [this](const TMap<FString, FString>& P, const FString& B) { return HandleGetSelectedActors(P, B); });
+	HandlerMap.Add(TEXT("set-actor-transform"), [this](const TMap<FString, FString>& P, const FString& B) { return HandleSetActorTransform(P, B); });
+	HandlerMap.Add(TEXT("set-actor-property"),  [this](const TMap<FString, FString>& P, const FString& B) { return HandleSetActorProperty(P, B); });
+	HandlerMap.Add(TEXT("spawn-actor"),         [this](const TMap<FString, FString>& P, const FString& B) { return HandleSpawnActor(P, B); });
+	HandlerMap.Add(TEXT("delete-actor"),        [this](const TMap<FString, FString>& P, const FString& B) { return HandleDeleteActor(P, B); });
 }
 
 // ============================================================

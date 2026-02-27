@@ -14,6 +14,10 @@ class UMaterial;
 class UMaterialInstanceConstant;
 class UMaterialFunction;
 class UMaterialExpression;
+class UWidgetBlueprint;
+class AActor;
+class UWorld;
+class ULevel;
 
 // ----- Snapshot data structures -----
 
@@ -98,6 +102,7 @@ private:
 	using FRequestHandler = TFunction<FString(const TMap<FString, FString>&, const FString&)>;
 	TMap<FString, FRequestHandler> HandlerMap;
 	TSet<FString> MutationEndpoints;
+	TSet<FString> WidgetMutationEndpoints; // excluded from undo transactions (see ProcessOneRequest)
 	void RegisterHandlers();
 	// ----- Queued request model -----
 	struct FPendingRequest
@@ -204,6 +209,27 @@ private:
 	FString HandleRemoveComponent(const FString& Body);
 	FString HandleListComponents(const FString& Body);
 
+	// ----- Level actors (read) -----
+	FString HandleGetCurrentLevel(const TMap<FString, FString>& Params, const FString&);
+	FString HandleGetSelectedActors(const TMap<FString, FString>& Params, const FString&);
+	FString HandleListActors(const TMap<FString, FString>& Params, const FString&);
+	FString HandleGetActorProperties(const TMap<FString, FString>& Params, const FString&);
+
+	// ----- Level actors (write) -----
+	FString HandleSetActorTransform(const TMap<FString, FString>&, const FString& Body);
+	FString HandleSetActorProperty(const TMap<FString, FString>&, const FString& Body);
+	FString HandleSpawnActor(const TMap<FString, FString>&, const FString& Body);
+	FString HandleDeleteActor(const TMap<FString, FString>&, const FString& Body);
+
+	// ----- Widget Blueprint tools -----
+	FString HandleListWidgetTree(const FString& Body);
+	FString HandleGetWidgetProperties(const FString& Body);
+	FString HandleAddWidget(const FString& Body);
+	FString HandleRemoveWidget(const FString& Body);
+	FString HandleSetWidgetProperty(const FString& Body);
+	FString HandleMoveWidget(const FString& Body);
+	FString HandleCreateWidgetBlueprint(const FString& Body);
+
 	// ----- Property defaults -----
 	FString HandleSetBlueprintDefault(const FString& Body);
 
@@ -281,6 +307,11 @@ private:
 	FString JsonToString(TSharedRef<FJsonObject> JsonObj);
 
 	// ----- Helpers -----
+	/** Find a placed actor in the world by its editor display label (case-insensitive). */
+	AActor* FindActorByLabel(UWorld* World, const FString& Label);
+	/** Save the UWorld's .umap package to disk. */
+	bool SaveLevelPackage(ULevel* Level);
+
 	FAssetData* FindAnyAsset(const FString& NameOrPath);
 	FAssetData* FindBlueprintAsset(const FString& NameOrPath);
 	FAssetData* FindMapAsset(const FString& NameOrPath);
@@ -290,6 +321,9 @@ private:
 	FString MakeErrorJson(const FString& Message);
 	bool SaveBlueprintPackage(UBlueprint* BP);
 	static FString UrlDecode(const FString& EncodedString);
+
+	// ----- Widget helpers -----
+	UWidgetBlueprint* LoadWidgetBlueprintByName(const FString& NameOrPath, FString& OutError);
 
 	// ----- Material helpers -----
 	/** Ensure that Material->MaterialGraph exists (creates it on demand for commandlet mode). */
