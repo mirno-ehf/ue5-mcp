@@ -211,6 +211,7 @@ private:
 
 	// ----- Level actors (read) -----
 	FString HandleGetCurrentLevel(const TMap<FString, FString>& Params, const FString&);
+	FString HandleGetSelectedActors(const TMap<FString, FString>& Params, const FString&);
 	FString HandleListActors(const TMap<FString, FString>& Params, const FString&);
 	FString HandleGetActorProperties(const TMap<FString, FString>& Params, const FString&);
 

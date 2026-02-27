@@ -5,6 +5,7 @@
 #include "GameFramework/Actor.h"
 #include "Components/PrimitiveComponent.h"
 #include "Editor.h"
+#include "Selection.h"
 #include "UObject/UnrealType.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
@@ -93,6 +94,70 @@ FString FBlueprintMCPServer::HandleGetCurrentLevel(const TMap<FString, FString>&
 	Result->SetStringField(TEXT("packageName"), World->GetPackage()->GetName());
 	Result->SetNumberField(TEXT("actorCount"), ActorCount);
 
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleGetSelectedActors — return actors currently selected in the editor
+// ============================================================
+
+FString FBlueprintMCPServer::HandleGetSelectedActors(const TMap<FString, FString>& Params, const FString&)
+{
+	if (!GEditor)
+	{
+		return MakeErrorJson(TEXT("GEditor not available — not running in editor mode"));
+	}
+
+	USelection* Selection = GEditor->GetSelectedActors();
+	if (!Selection)
+	{
+		return MakeErrorJson(TEXT("Could not retrieve editor actor selection"));
+	}
+
+	TArray<AActor*> SelectedActors;
+	Selection->GetSelectedObjects<AActor>(SelectedActors);
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: GetSelectedActors — %d actors selected"), SelectedActors.Num());
+
+	TArray<TSharedPtr<FJsonValue>> ActorsArr;
+
+	for (AActor* Actor : SelectedActors)
+	{
+		if (!Actor) continue;
+
+		FVector  Loc   = Actor->GetActorLocation();
+		FRotator Rot   = Actor->GetActorRotation();
+		FVector  Scale = Actor->GetActorScale3D();
+
+		TSharedRef<FJsonObject> LocObj = MakeShared<FJsonObject>();
+		LocObj->SetNumberField(TEXT("x"), Loc.X);
+		LocObj->SetNumberField(TEXT("y"), Loc.Y);
+		LocObj->SetNumberField(TEXT("z"), Loc.Z);
+
+		TSharedRef<FJsonObject> RotObj = MakeShared<FJsonObject>();
+		RotObj->SetNumberField(TEXT("pitch"), Rot.Pitch);
+		RotObj->SetNumberField(TEXT("yaw"),   Rot.Yaw);
+		RotObj->SetNumberField(TEXT("roll"),  Rot.Roll);
+
+		TSharedRef<FJsonObject> ScaleObj = MakeShared<FJsonObject>();
+		ScaleObj->SetNumberField(TEXT("x"), Scale.X);
+		ScaleObj->SetNumberField(TEXT("y"), Scale.Y);
+		ScaleObj->SetNumberField(TEXT("z"), Scale.Z);
+
+		TSharedRef<FJsonObject> ActorObj = MakeShared<FJsonObject>();
+		ActorObj->SetStringField(TEXT("label"),  Actor->GetActorLabel());
+		ActorObj->SetStringField(TEXT("class"),  Actor->GetClass()->GetName());
+		ActorObj->SetStringField(TEXT("folder"), Actor->GetFolderPath().ToString());
+		ActorObj->SetObjectField(TEXT("location"), LocObj);
+		ActorObj->SetObjectField(TEXT("rotation"), RotObj);
+		ActorObj->SetObjectField(TEXT("scale"),    ScaleObj);
+
+		ActorsArr.Add(MakeShared<FJsonValueObject>(ActorObj));
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetNumberField(TEXT("count"),  ActorsArr.Num());
+	Result->SetArrayField (TEXT("actors"), ActorsArr);
 	return JsonToString(Result);
 }
 

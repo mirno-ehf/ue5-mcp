@@ -4,6 +4,43 @@ import { ensureUE, ueGet, uePost } from "../ue-bridge.js";
 
 export function registerLevelTools(server: McpServer): void {
   server.tool(
+    "get_selected_actors",
+    "Returns all actors currently selected in the Unreal Editor viewport, including their label, class, folder, location, rotation, and scale. Use this to operate on whatever the user has selected without needing to know actor labels in advance.",
+    {},
+    async () => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await ueGet("/api/selected-actors", {});
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const lines: string[] = [];
+
+      if (!data.count) {
+        lines.push("No actors selected.");
+        lines.push("");
+        lines.push("Select one or more actors in the viewport, then call this tool again.");
+      } else {
+        lines.push(`Selected actors (${data.count}):`);
+        for (const a of data.actors || []) {
+          const loc = a.location;
+          const rot = a.rotation;
+          lines.push(`  ${a.label} (${a.class})${a.folder ? ` [${a.folder}]` : ""}`);
+          lines.push(`    Location: (${loc.x?.toFixed(1)}, ${loc.y?.toFixed(1)}, ${loc.z?.toFixed(1)}) cm`);
+          lines.push(`    Rotation: pitch=${rot.pitch?.toFixed(1)} yaw=${rot.yaw?.toFixed(1)} roll=${rot.roll?.toFixed(1)}`);
+        }
+        lines.push("");
+        lines.push("Next steps:");
+        for (const a of data.actors || []) {
+          lines.push(`  get_actor_properties(label="${a.label}") — inspect properties`);
+        }
+      }
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  server.tool(
     "get_current_level",
     "Get information about the currently open level in the Unreal Editor, including its name, package path, and actor count.",
     {},

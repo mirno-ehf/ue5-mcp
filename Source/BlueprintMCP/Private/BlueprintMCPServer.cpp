@@ -811,6 +811,8 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("list-actors")));
 	Router->BindRoute(FHttpPath(TEXT("/api/actor-properties")), EHttpServerRequestVerbs::VERB_GET,
 		QueuedHandler(TEXT("actor-properties")));
+	Router->BindRoute(FHttpPath(TEXT("/api/selected-actors")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("selected-actors")));
 
 	// Level actor tools (write)
 	Router->BindRoute(FHttpPath(TEXT("/api/set-actor-transform")), EHttpServerRequestVerbs::VERB_POST,
@@ -1122,6 +1124,7 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("current-level"),       [this](const TMap<FString, FString>& P, const FString& B) { return HandleGetCurrentLevel(P, B); });
 	HandlerMap.Add(TEXT("list-actors"),         [this](const TMap<FString, FString>& P, const FString& B) { return HandleListActors(P, B); });
 	HandlerMap.Add(TEXT("actor-properties"),    [this](const TMap<FString, FString>& P, const FString& B) { return HandleGetActorProperties(P, B); });
+	HandlerMap.Add(TEXT("selected-actors"),     [this](const TMap<FString, FString>& P, const FString& B) { return HandleGetSelectedActors(P, B); });
 	HandlerMap.Add(TEXT("set-actor-transform"), [this](const TMap<FString, FString>& P, const FString& B) { return HandleSetActorTransform(P, B); });
 	HandlerMap.Add(TEXT("set-actor-property"),  [this](const TMap<FString, FString>& P, const FString& B) { return HandleSetActorProperty(P, B); });
 	HandlerMap.Add(TEXT("spawn-actor"),         [this](const TMap<FString, FString>& P, const FString& B) { return HandleSpawnActor(P, B); });
