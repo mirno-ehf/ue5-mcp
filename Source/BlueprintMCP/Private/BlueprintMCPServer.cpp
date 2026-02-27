@@ -804,6 +804,24 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/create-widget-blueprint")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("createWidgetBlueprint")));
 
+	// Level actor tools (read)
+	Router->BindRoute(FHttpPath(TEXT("/api/current-level")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("current-level")));
+	Router->BindRoute(FHttpPath(TEXT("/api/list-actors")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("list-actors")));
+	Router->BindRoute(FHttpPath(TEXT("/api/actor-properties")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("actor-properties")));
+
+	// Level actor tools (write)
+	Router->BindRoute(FHttpPath(TEXT("/api/set-actor-transform")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("set-actor-transform")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-actor-property")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("set-actor-property")));
+	Router->BindRoute(FHttpPath(TEXT("/api/spawn-actor")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("spawn-actor")));
+	Router->BindRoute(FHttpPath(TEXT("/api/delete-actor")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("delete-actor")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -966,6 +984,11 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("setWidgetProperty"),
 		TEXT("moveWidget"),
 		TEXT("createWidgetBlueprint"),
+		// Level actor mutations
+		TEXT("set-actor-transform"),
+		TEXT("set-actor-property"),
+		TEXT("spawn-actor"),
+		TEXT("delete-actor"),
 	};
 
 	// Widget mutations that must NOT be wrapped in undo transactions.
@@ -1094,6 +1117,15 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("setWidgetProperty"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleSetWidgetProperty(B); });
 	HandlerMap.Add(TEXT("moveWidget"),              [this](const TMap<FString, FString>&, const FString& B) { return HandleMoveWidget(B); });
 	HandlerMap.Add(TEXT("createWidgetBlueprint"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateWidgetBlueprint(B); });
+
+	// Level actor handlers
+	HandlerMap.Add(TEXT("current-level"),       [this](const TMap<FString, FString>& P, const FString& B) { return HandleGetCurrentLevel(P, B); });
+	HandlerMap.Add(TEXT("list-actors"),         [this](const TMap<FString, FString>& P, const FString& B) { return HandleListActors(P, B); });
+	HandlerMap.Add(TEXT("actor-properties"),    [this](const TMap<FString, FString>& P, const FString& B) { return HandleGetActorProperties(P, B); });
+	HandlerMap.Add(TEXT("set-actor-transform"), [this](const TMap<FString, FString>& P, const FString& B) { return HandleSetActorTransform(P, B); });
+	HandlerMap.Add(TEXT("set-actor-property"),  [this](const TMap<FString, FString>& P, const FString& B) { return HandleSetActorProperty(P, B); });
+	HandlerMap.Add(TEXT("spawn-actor"),         [this](const TMap<FString, FString>& P, const FString& B) { return HandleSpawnActor(P, B); });
+	HandlerMap.Add(TEXT("delete-actor"),        [this](const TMap<FString, FString>& P, const FString& B) { return HandleDeleteActor(P, B); });
 }
 
 // ============================================================

@@ -21,6 +21,7 @@ import { registerMaterialReadTools } from "./tools/material-read.js";
 import { registerMaterialMutationTools } from "./tools/material-mutation.js";
 import { registerAnimationTools } from "./tools/animation-mutation.js";
 import { registerWidgetTools } from "./tools/widgets.js";
+import { registerLevelTools } from "./tools/level.js";
 
 // Resource registrations
 import { registerBlueprintListResource } from "./resources/blueprint-list.js";
@@ -50,6 +51,7 @@ registerMaterialReadTools(server);
 registerMaterialMutationTools(server);
 registerAnimationTools(server);
 registerWidgetTools(server);
+registerLevelTools(server);
 
 // Register resources
 registerBlueprintListResource(server);

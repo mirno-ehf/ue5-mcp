@@ -15,6 +15,9 @@ class UMaterialInstanceConstant;
 class UMaterialFunction;
 class UMaterialExpression;
 class UWidgetBlueprint;
+class AActor;
+class UWorld;
+class ULevel;
 
 // ----- Snapshot data structures -----
 
@@ -206,6 +209,17 @@ private:
 	FString HandleRemoveComponent(const FString& Body);
 	FString HandleListComponents(const FString& Body);
 
+	// ----- Level actors (read) -----
+	FString HandleGetCurrentLevel(const TMap<FString, FString>& Params, const FString&);
+	FString HandleListActors(const TMap<FString, FString>& Params, const FString&);
+	FString HandleGetActorProperties(const TMap<FString, FString>& Params, const FString&);
+
+	// ----- Level actors (write) -----
+	FString HandleSetActorTransform(const TMap<FString, FString>&, const FString& Body);
+	FString HandleSetActorProperty(const TMap<FString, FString>&, const FString& Body);
+	FString HandleSpawnActor(const TMap<FString, FString>&, const FString& Body);
+	FString HandleDeleteActor(const TMap<FString, FString>&, const FString& Body);
+
 	// ----- Widget Blueprint tools -----
 	FString HandleListWidgetTree(const FString& Body);
 	FString HandleGetWidgetProperties(const FString& Body);
@@ -292,6 +306,11 @@ private:
 	FString JsonToString(TSharedRef<FJsonObject> JsonObj);
 
 	// ----- Helpers -----
+	/** Find a placed actor in the world by its editor display label (case-insensitive). */
+	AActor* FindActorByLabel(UWorld* World, const FString& Label);
+	/** Save the UWorld's .umap package to disk. */
+	bool SaveLevelPackage(ULevel* Level);
+
 	FAssetData* FindAnyAsset(const FString& NameOrPath);
 	FAssetData* FindBlueprintAsset(const FString& NameOrPath);
 	FAssetData* FindMapAsset(const FString& NameOrPath);
