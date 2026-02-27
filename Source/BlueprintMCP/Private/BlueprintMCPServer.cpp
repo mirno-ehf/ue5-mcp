@@ -867,16 +867,22 @@ bool FBlueprintMCPServer::ProcessOneRequest()
 	FString Response;
 	if (FRequestHandler* Handler = HandlerMap.Find(Req->Endpoint))
 	{
-		// Wrap mutation endpoints in an undo transaction so users can Ctrl+Z
+		// Wrap mutation endpoints in an undo transaction so users can Ctrl+Z.
+		// Widget Blueprint mutations are EXCLUDED because BP recompilation creates
+		// REINST_ objects whose WidgetTree references get trapped in the TransBuffer,
+		// preventing the old World from being garbage-collected (fatal "World Leak"
+		// crash in ReferenceChainSearch.cpp). Widget tools use snapshot/restore instead.
 		const bool bIsMutation = MutationEndpoints.Contains(Req->Endpoint);
-		if (bIsMutation && GEditor)
+		const bool bIsWidgetMutation = WidgetMutationEndpoints.Contains(Req->Endpoint);
+		const bool bUseTransaction = bIsMutation && !bIsWidgetMutation && GEditor != nullptr;
+		if (bUseTransaction)
 		{
 			GEditor->BeginTransaction(FText::FromString(FString::Printf(TEXT("BlueprintMCP: %s"), *Req->Endpoint)));
 		}
 
 		Response = (*Handler)(Req->QueryParams, Req->Body);
 
-		if (bIsMutation && GEditor)
+		if (bUseTransaction)
 		{
 			GEditor->EndTransaction();
 		}
@@ -955,6 +961,17 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("addAnimNode"),
 		TEXT("addStateMachine"),
 		TEXT("setStateAnimation"),
+		TEXT("addWidget"),
+		TEXT("removeWidget"),
+		TEXT("setWidgetProperty"),
+		TEXT("moveWidget"),
+		TEXT("createWidgetBlueprint"),
+	};
+
+	// Widget mutations that must NOT be wrapped in undo transactions.
+	// Recompilation of Widget Blueprints creates REINST_ objects whose
+	// WidgetTree refs in the TransBuffer prevent World GC → fatal crash.
+	WidgetMutationEndpoints = {
 		TEXT("addWidget"),
 		TEXT("removeWidget"),
 		TEXT("setWidgetProperty"),

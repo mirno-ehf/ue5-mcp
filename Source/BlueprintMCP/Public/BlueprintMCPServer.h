@@ -99,6 +99,7 @@ private:
 	using FRequestHandler = TFunction<FString(const TMap<FString, FString>&, const FString&)>;
 	TMap<FString, FRequestHandler> HandlerMap;
 	TSet<FString> MutationEndpoints;
+	TSet<FString> WidgetMutationEndpoints; // excluded from undo transactions (see ProcessOneRequest)
 	void RegisterHandlers();
 	// ----- Queued request model -----
 	struct FPendingRequest
