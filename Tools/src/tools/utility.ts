@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 import { ensureUE, ueGet, uePost, isUEHealthy, gracefulShutdown, state } from "../ue-bridge.js";
 
 export function registerUtilityTools(server: McpServer): void {
@@ -41,6 +42,32 @@ export function registerUtilityTools(server: McpServer): void {
         `Material Instances: ${data.materialInstanceCount}${data.delta?.materialInstances ? ` (${data.delta.materialInstances >= 0 ? "+" : ""}${data.delta.materialInstances})` : ""}`,
         `Material Functions: ${data.materialFunctionCount}${data.delta?.materialFunctions ? ` (${data.delta.materialFunctions >= 0 ? "+" : ""}${data.delta.materialFunctions})` : ""}`,
       ];
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  server.tool(
+    "exec_command",
+    "Execute an editor console command and return its output. Requires editor mode (not commandlet). Useful for: saving assets (\"Asset.SaveAll\"), running automation tests (\"Automation RunTests <filter>\"), triggering Live Coding, etc.",
+    {
+      command: z.string().describe("The console command to execute (e.g. \"Asset.SaveAll\", \"Automation RunTests MyTests\")"),
+    },
+    async ({ command }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await uePost("/api/exec", { command });
+      if (data.error) {
+        return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+      }
+
+      const lines = [
+        `Command: ${data.command}`,
+        `Success: ${data.success}`,
+      ];
+      if (data.output) {
+        lines.push(`Output:\n${data.output}`);
+      }
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );

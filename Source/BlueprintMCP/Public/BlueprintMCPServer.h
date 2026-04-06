@@ -257,6 +257,9 @@ private:
 	FString HandleDiffMaterialGraph(const FString& Body);
 	FString HandleRestoreMaterialGraph(const FString& Body);
 
+	// ----- Console command execution -----
+	FString HandleExecCommand(const FString& Body);
+
 	// ----- Animation Blueprint handlers -----
 	FString HandleCreateAnimBlueprint(const FString& Body);
 	FString HandleAddAnimState(const FString& Body);

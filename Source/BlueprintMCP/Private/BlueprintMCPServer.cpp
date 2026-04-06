@@ -39,6 +39,7 @@
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
+#include "Misc/OutputDeviceHelper.h"
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
 #include "UObject/UObjectIterator.h"
@@ -788,6 +789,10 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/set-state-blend-space")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("setStateBlendSpace")));
 
+	// Console command execution
+	Router->BindRoute(FHttpPath(TEXT("/api/exec")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("exec")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -1047,6 +1052,9 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("createBlendSpace"),        [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateBlendSpace(B); });
 	HandlerMap.Add(TEXT("setBlendSpaceSamples"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleSetBlendSpaceSamples(B); });
 	HandlerMap.Add(TEXT("setStateBlendSpace"),      [this](const TMap<FString, FString>&, const FString& B) { return HandleSetStateBlendSpace(B); });
+
+	// Console command execution
+	HandlerMap.Add(TEXT("exec"),                    [this](const TMap<FString, FString>&, const FString& B) { return HandleExecCommand(B); });
 }
 
 // ============================================================
@@ -2093,4 +2101,62 @@ TSharedPtr<FJsonObject> FBlueprintMCPServer::SerializeMaterialExpression(UMateri
 	}
 
 	return EJ;
+}
+
+// ============================================================
+// HandleExecCommand — execute an editor console command
+// ============================================================
+
+/**
+ * Custom output device that captures console command output into a string.
+ */
+class FStringOutputDeviceCapture : public FOutputDevice
+{
+public:
+	FString CapturedOutput;
+
+	virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const FName& Category) override
+	{
+		if (!CapturedOutput.IsEmpty())
+		{
+			CapturedOutput += TEXT("\n");
+		}
+		CapturedOutput += V;
+	}
+};
+
+FString FBlueprintMCPServer::HandleExecCommand(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body."));
+	}
+
+	FString Command;
+	if (!Json->TryGetStringField(TEXT("command"), Command) || Command.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required field: 'command'."));
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: exec_command(\"%s\")"), *Command);
+
+	// Editor-only: refuse if running in commandlet mode (no GEditor/GWorld for most commands)
+	if (!bIsEditor)
+	{
+		return MakeErrorJson(TEXT("exec_command is only available in editor mode. Open the UE5 editor to use this tool."));
+	}
+
+	// Capture output from the command
+	FStringOutputDeviceCapture OutputCapture;
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	bool bSuccess = GEngine->Exec(World, *Command, OutputCapture);
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), bSuccess);
+	Result->SetStringField(TEXT("command"), Command);
+	Result->SetStringField(TEXT("output"), OutputCapture.CapturedOutput);
+
+	return JsonToString(Result);
 }
