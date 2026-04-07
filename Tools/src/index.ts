@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { getUEHealth, gracefulShutdown, state } from "./ue-bridge.js";
 
+// Tool registrations
 import { registerReadTools } from "./tools/read.js";
 import { registerMutationTools } from "./tools/mutation.js";
 import { registerVariableTools } from "./tools/variables.js";
@@ -21,11 +22,16 @@ import { registerMaterialMutationTools } from "./tools/material-mutation.js";
 import { registerAnimationTools } from "./tools/animation-mutation.js";
 import { registerActorQueryTools } from "./tools/actor-query.js";
 
+// Resource registrations
 import { registerBlueprintListResource } from "./resources/blueprint-list.js";
 import { registerWorkflowRecipesResource } from "./resources/workflow-recipes.js";
 
-const server = new McpServer({ name: "blueprint-mcp", version: "1.0.0" });
+const server = new McpServer({
+  name: "blueprint-mcp",
+  version: "1.0.0",
+});
 
+// Register all tools
 registerReadTools(server);
 registerMutationTools(server);
 registerVariableTools(server);
@@ -45,13 +51,17 @@ registerMaterialMutationTools(server);
 registerAnimationTools(server);
 registerActorQueryTools(server);
 
+// Register resources
 registerBlueprintListResource(server);
 registerWorkflowRecipesResource(server);
 
+// Cleanup on exit — only kill the commandlet if we spawned it (don't kill the editor).
 process.on("exit", () => { if (!state.editorMode) state.ueProcess?.kill(); });
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, async () => {
-    if (!state.editorMode && state.ueProcess) await gracefulShutdown();
+    if (!state.editorMode && state.ueProcess) {
+      await gracefulShutdown();
+    }
     process.exit();
   });
 }
@@ -65,8 +75,12 @@ async function main() {
     state.editorMode = false;
     console.error("UE5 server not detected. Commandlet will be spawned on first tool call.");
   }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
 
-main().catch((err) => { console.error("Fatal error:", err); process.exit(1); });
+main().catch((err) => {
+  console.error("Fatal error:", err);
+  process.exit(1);
+});

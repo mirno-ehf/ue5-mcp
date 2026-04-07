@@ -793,6 +793,18 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/exec")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("exec")));
 
+	// Actor query tools
+	Router->BindRoute(FHttpPath(TEXT("/api/find-actors-by-tag")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("findActorsByTag")));
+	Router->BindRoute(FHttpPath(TEXT("/api/find-actors-by-class")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("findActorsByClass")));
+	Router->BindRoute(FHttpPath(TEXT("/api/find-actors-in-radius")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("findActorsInRadius")));
+	Router->BindRoute(FHttpPath(TEXT("/api/get-actor-bounds")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("getActorBounds")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-actor-tags")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setActorTags")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -944,6 +956,7 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("addAnimNode"),
 		TEXT("addStateMachine"),
 		TEXT("setStateAnimation"),
+		TEXT("setActorTags"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -1055,6 +1068,13 @@ void FBlueprintMCPServer::RegisterHandlers()
 
 	// Console command execution
 	HandlerMap.Add(TEXT("exec"),                    [this](const TMap<FString, FString>&, const FString& B) { return HandleExecCommand(B); });
+
+	// Actor query handlers
+	HandlerMap.Add(TEXT("findActorsByTag"), [this](const TMap<FString, FString>&, const FString& B) { return HandleFindActorsByTag(B); });
+	HandlerMap.Add(TEXT("findActorsByClass"), [this](const TMap<FString, FString>&, const FString& B) { return HandleFindActorsByClass(B); });
+	HandlerMap.Add(TEXT("findActorsInRadius"), [this](const TMap<FString, FString>&, const FString& B) { return HandleFindActorsInRadius(B); });
+	HandlerMap.Add(TEXT("getActorBounds"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetActorBounds(B); });
+	HandlerMap.Add(TEXT("setActorTags"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetActorTags(B); });
 }
 
 // ============================================================
