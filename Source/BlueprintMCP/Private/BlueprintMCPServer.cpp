@@ -793,6 +793,12 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/exec")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("exec")));
 
+	// Content browser tools
+	Router->BindRoute(FHttpPath(TEXT("/api/navigate-content-browser")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("navigateContentBrowser")));
+	Router->BindRoute(FHttpPath(TEXT("/api/open-asset-editor")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("openAssetEditor")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -1055,6 +1061,10 @@ void FBlueprintMCPServer::RegisterHandlers()
 
 	// Console command execution
 	HandlerMap.Add(TEXT("exec"),                    [this](const TMap<FString, FString>&, const FString& B) { return HandleExecCommand(B); });
+
+	// Content browser handlers
+	HandlerMap.Add(TEXT("navigateContentBrowser"), [this](const TMap<FString, FString>&, const FString& B) { return HandleNavigateContentBrowser(B); });
+	HandlerMap.Add(TEXT("openAssetEditor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleOpenAssetEditor(B); });
 }
 
 // ============================================================

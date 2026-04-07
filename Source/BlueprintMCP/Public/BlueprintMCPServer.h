@@ -260,6 +260,10 @@ private:
 	// ----- Console command execution -----
 	FString HandleExecCommand(const FString& Body);
 
+	// ----- Content browser tools -----
+	FString HandleNavigateContentBrowser(const FString& Body);
+	FString HandleOpenAssetEditor(const FString& Body);
+
 	// ----- Animation Blueprint handlers -----
 	FString HandleCreateAnimBlueprint(const FString& Body);
 	FString HandleAddAnimState(const FString& Body);
