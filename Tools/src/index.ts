@@ -20,6 +20,7 @@ import { registerUserTypeTools } from "./tools/user-types.js";
 import { registerMaterialReadTools } from "./tools/material-read.js";
 import { registerMaterialMutationTools } from "./tools/material-mutation.js";
 import { registerAnimationTools } from "./tools/animation-mutation.js";
+import { registerPIELifecycleTools } from "./tools/pie-lifecycle.js";
 
 // Resource registrations
 import { registerBlueprintListResource } from "./resources/blueprint-list.js";
@@ -48,6 +49,7 @@ registerUserTypeTools(server);
 registerMaterialReadTools(server);
 registerMaterialMutationTools(server);
 registerAnimationTools(server);
+registerPIELifecycleTools(server);
 
 // Register resources
 registerBlueprintListResource(server);

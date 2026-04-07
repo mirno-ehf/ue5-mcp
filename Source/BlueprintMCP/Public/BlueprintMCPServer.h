@@ -260,6 +260,12 @@ private:
 	// ----- Console command execution -----
 	FString HandleExecCommand(const FString& Body);
 
+	// ----- PIE lifecycle tools -----
+	FString HandleStartPIE(const FString& Body);
+	FString HandleStopPIE(const FString& Body);
+	FString HandleIsPIERunning(const FString& Body);
+	FString HandlePIEPause(const FString& Body);
+
 	// ----- Animation Blueprint handlers -----
 	FString HandleCreateAnimBlueprint(const FString& Body);
 	FString HandleAddAnimState(const FString& Body);

@@ -793,6 +793,16 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/exec")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("exec")));
 
+	// PIE lifecycle tools
+	Router->BindRoute(FHttpPath(TEXT("/api/start-pie")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("startPIE")));
+	Router->BindRoute(FHttpPath(TEXT("/api/stop-pie")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("stopPIE")));
+	Router->BindRoute(FHttpPath(TEXT("/api/is-pie-running")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("isPIERunning")));
+	Router->BindRoute(FHttpPath(TEXT("/api/pie-pause")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("piePause")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -944,6 +954,7 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("addAnimNode"),
 		TEXT("addStateMachine"),
 		TEXT("setStateAnimation"),
+		TEXT("startPIE"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -1055,6 +1066,12 @@ void FBlueprintMCPServer::RegisterHandlers()
 
 	// Console command execution
 	HandlerMap.Add(TEXT("exec"),                    [this](const TMap<FString, FString>&, const FString& B) { return HandleExecCommand(B); });
+
+	// PIE lifecycle handlers
+	HandlerMap.Add(TEXT("startPIE"), [this](const TMap<FString, FString>&, const FString& B) { return HandleStartPIE(B); });
+	HandlerMap.Add(TEXT("stopPIE"), [this](const TMap<FString, FString>&, const FString& B) { return HandleStopPIE(B); });
+	HandlerMap.Add(TEXT("isPIERunning"), [this](const TMap<FString, FString>&, const FString& B) { return HandleIsPIERunning(B); });
+	HandlerMap.Add(TEXT("piePause"), [this](const TMap<FString, FString>&, const FString& B) { return HandlePIEPause(B); });
 }
 
 // ============================================================
