@@ -793,6 +793,12 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/exec")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("exec")));
 
+	// Output log tools
+	Router->BindRoute(FHttpPath(TEXT("/api/get-output-log")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("getOutputLog")));
+	Router->BindRoute(FHttpPath(TEXT("/api/clear-output-log")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("clearOutputLog")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -944,6 +950,7 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("addAnimNode"),
 		TEXT("addStateMachine"),
 		TEXT("setStateAnimation"),
+		TEXT("clearOutputLog"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -1055,6 +1062,10 @@ void FBlueprintMCPServer::RegisterHandlers()
 
 	// Console command execution
 	HandlerMap.Add(TEXT("exec"),                    [this](const TMap<FString, FString>&, const FString& B) { return HandleExecCommand(B); });
+
+	// Output log handlers
+	HandlerMap.Add(TEXT("getOutputLog"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetOutputLog(B); });
+	HandlerMap.Add(TEXT("clearOutputLog"), [this](const TMap<FString, FString>&, const FString& B) { return HandleClearOutputLog(B); });
 }
 
 // ============================================================
