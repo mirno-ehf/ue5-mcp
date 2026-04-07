@@ -793,6 +793,16 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/exec")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("exec")));
 
+	// Undo/Redo tools
+	Router->BindRoute(FHttpPath(TEXT("/api/undo")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("undo")));
+	Router->BindRoute(FHttpPath(TEXT("/api/redo")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("redo")));
+	Router->BindRoute(FHttpPath(TEXT("/api/begin-transaction")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("beginTransaction")));
+	Router->BindRoute(FHttpPath(TEXT("/api/end-transaction")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("endTransaction")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -944,6 +954,8 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("addAnimNode"),
 		TEXT("addStateMachine"),
 		TEXT("setStateAnimation"),
+		TEXT("undo"),
+		TEXT("redo"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -1055,6 +1067,12 @@ void FBlueprintMCPServer::RegisterHandlers()
 
 	// Console command execution
 	HandlerMap.Add(TEXT("exec"),                    [this](const TMap<FString, FString>&, const FString& B) { return HandleExecCommand(B); });
+
+	// Undo/Redo handlers
+	HandlerMap.Add(TEXT("undo"), [this](const TMap<FString, FString>&, const FString& B) { return HandleUndo(B); });
+	HandlerMap.Add(TEXT("redo"), [this](const TMap<FString, FString>&, const FString& B) { return HandleRedo(B); });
+	HandlerMap.Add(TEXT("beginTransaction"), [this](const TMap<FString, FString>&, const FString& B) { return HandleBeginTransaction(B); });
+	HandlerMap.Add(TEXT("endTransaction"), [this](const TMap<FString, FString>&, const FString& B) { return HandleEndTransaction(B); });
 }
 
 // ============================================================

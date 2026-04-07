@@ -260,6 +260,13 @@ private:
 	// ----- Console command execution -----
 	FString HandleExecCommand(const FString& Body);
 
+
+	// ----- Undo/Redo tools -----
+	FString HandleUndo(const FString& Body);
+	FString HandleRedo(const FString& Body);
+	FString HandleBeginTransaction(const FString& Body);
+	FString HandleEndTransaction(const FString& Body);
+
 	// ----- Animation Blueprint handlers -----
 	FString HandleCreateAnimBlueprint(const FString& Body);
 	FString HandleAddAnimState(const FString& Body);
