@@ -793,6 +793,12 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/exec")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("exec")));
 
+	// Camera tools
+	Router->BindRoute(FHttpPath(TEXT("/api/get-viewport-camera")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("getViewportCamera")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-viewport-camera")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setViewportCamera")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -944,6 +950,7 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("addAnimNode"),
 		TEXT("addStateMachine"),
 		TEXT("setStateAnimation"),
+		TEXT("setViewportCamera"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -1055,6 +1062,10 @@ void FBlueprintMCPServer::RegisterHandlers()
 
 	// Console command execution
 	HandlerMap.Add(TEXT("exec"),                    [this](const TMap<FString, FString>&, const FString& B) { return HandleExecCommand(B); });
+
+	// Camera handlers
+	HandlerMap.Add(TEXT("getViewportCamera"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetViewportCamera(B); });
+	HandlerMap.Add(TEXT("setViewportCamera"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetViewportCamera(B); });
 }
 
 // ============================================================
