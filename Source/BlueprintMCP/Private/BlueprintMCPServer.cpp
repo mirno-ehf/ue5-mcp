@@ -793,6 +793,12 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/exec")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("exec")));
 
+	// Screenshot tools
+	Router->BindRoute(FHttpPath(TEXT("/api/take-screenshot")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("takeScreenshot")));
+	Router->BindRoute(FHttpPath(TEXT("/api/take-high-res-screenshot")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("takeHighResScreenshot")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -1055,6 +1061,10 @@ void FBlueprintMCPServer::RegisterHandlers()
 
 	// Console command execution
 	HandlerMap.Add(TEXT("exec"),                    [this](const TMap<FString, FString>&, const FString& B) { return HandleExecCommand(B); });
+
+	// Screenshot handlers
+	HandlerMap.Add(TEXT("takeScreenshot"), [this](const TMap<FString, FString>&, const FString& B) { return HandleTakeScreenshot(B); });
+	HandlerMap.Add(TEXT("takeHighResScreenshot"), [this](const TMap<FString, FString>&, const FString& B) { return HandleTakeHighResScreenshot(B); });
 }
 
 // ============================================================

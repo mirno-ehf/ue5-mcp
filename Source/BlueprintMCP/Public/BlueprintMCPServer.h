@@ -260,6 +260,10 @@ private:
 	// ----- Console command execution -----
 	FString HandleExecCommand(const FString& Body);
 
+	// ----- Screenshot tools -----
+	FString HandleTakeScreenshot(const FString& Body);
+	FString HandleTakeHighResScreenshot(const FString& Body);
+
 	// ----- Animation Blueprint handlers -----
 	FString HandleCreateAnimBlueprint(const FString& Body);
 	FString HandleAddAnimState(const FString& Body);
