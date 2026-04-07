@@ -260,6 +260,12 @@ private:
 	// ----- Console command execution -----
 	FString HandleExecCommand(const FString& Body);
 
+
+	// ----- CVar tools -----
+	FString HandleGetCVar(const FString& Body);
+	FString HandleSetCVar(const FString& Body);
+	FString HandleListCVars(const FString& Body);
+
 	// ----- Animation Blueprint handlers -----
 	FString HandleCreateAnimBlueprint(const FString& Body);
 	FString HandleAddAnimState(const FString& Body);

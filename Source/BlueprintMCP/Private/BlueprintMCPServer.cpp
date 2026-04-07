@@ -793,6 +793,14 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/exec")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("exec")));
 
+	// CVar tools
+	Router->BindRoute(FHttpPath(TEXT("/api/get-cvar")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("getCVar")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-cvar")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setCVar")));
+	Router->BindRoute(FHttpPath(TEXT("/api/list-cvars")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("listCVars")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -944,6 +952,7 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("addAnimNode"),
 		TEXT("addStateMachine"),
 		TEXT("setStateAnimation"),
+		TEXT("setCVar"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -1055,6 +1064,11 @@ void FBlueprintMCPServer::RegisterHandlers()
 
 	// Console command execution
 	HandlerMap.Add(TEXT("exec"),                    [this](const TMap<FString, FString>&, const FString& B) { return HandleExecCommand(B); });
+
+	// CVar handlers
+	HandlerMap.Add(TEXT("getCVar"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetCVar(B); });
+	HandlerMap.Add(TEXT("setCVar"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetCVar(B); });
+	HandlerMap.Add(TEXT("listCVars"), [this](const TMap<FString, FString>&, const FString& B) { return HandleListCVars(B); });
 }
 
 // ============================================================
