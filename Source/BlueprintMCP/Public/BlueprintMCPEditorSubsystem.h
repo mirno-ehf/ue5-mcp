@@ -30,5 +30,8 @@ public:
 	virtual TStatId GetStatId() const override;
 
 private:
+	void HandleAssetRegistryReady();
+
 	TUniquePtr<FBlueprintMCPServer> Server;
+	FDelegateHandle OnFilesLoadedHandle;
 };

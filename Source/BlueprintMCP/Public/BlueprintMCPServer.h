@@ -53,6 +53,11 @@ public:
 	void Stop();
 	bool ProcessOneRequest();
 	bool IsRunning() const { return bRunning; }
+
+	/** Re-scan the Asset Registry and refresh cached asset lists. */
+	FString HandleRescan();
+
+	/** Port the server is listening on. */
 	int32 GetPort() const { return Port; }
 	int32 GetBlueprintCount() const { return AllBlueprintAssets.Num(); }
 	int32 GetMapCount() const { return AllMapAssets.Num(); }
@@ -82,7 +87,7 @@ private:
 	bool bRunning = false;
 	bool bIsEditor = false;
 
-	FString HandleRescan();
+	// ----- Request handlers (read-only) -----
 	FString HandleList(const TMap<FString, FString>& Params);
 	FString HandleGetBlueprint(const TMap<FString, FString>& Params);
 	FString HandleGetGraph(const TMap<FString, FString>& Params);

@@ -1,5 +1,7 @@
 #include "BlueprintMCPEditorSubsystem.h"
 #include "BlueprintMCPServer.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 
 void UBlueprintMCPEditorSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -15,6 +17,18 @@ void UBlueprintMCPEditorSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 	if (Server->Start(9847, /*bEditorMode=*/true))
 	{
 		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Editor subsystem started — MCP server on port %d"), Server->GetPort());
+
+		// Asset Registry loads asynchronously during editor startup.
+		// The initial scan in Start() only sees engine assets.
+		// Defer a full rescan until the registry finishes gathering.
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		IAssetRegistry& AR = ARM.Get();
+
+		if (AR.IsGathering())
+		{
+			OnFilesLoadedHandle = AR.OnFilesLoaded().AddUObject(
+				this, &UBlueprintMCPEditorSubsystem::HandleAssetRegistryReady);
+		}
 	}
 	else
 	{
@@ -23,8 +37,31 @@ void UBlueprintMCPEditorSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 	}
 }
 
+void UBlueprintMCPEditorSubsystem::HandleAssetRegistryReady()
+{
+	if (OnFilesLoadedHandle.IsValid())
+	{
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		ARM.Get().OnFilesLoaded().Remove(OnFilesLoadedHandle);
+		OnFilesLoadedHandle.Reset();
+	}
+
+	if (Server && Server->IsRunning())
+	{
+		Server->HandleRescan();
+		UE_LOG(LogTemp, Display, TEXT("BlueprintMCP: Deferred rescan complete after Asset Registry finished gathering."));
+	}
+}
+
 void UBlueprintMCPEditorSubsystem::Deinitialize()
 {
+	if (OnFilesLoadedHandle.IsValid() && FModuleManager::Get().IsModuleLoaded("AssetRegistry"))
+	{
+		FAssetRegistryModule& ARM = FModuleManager::GetModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		ARM.Get().OnFilesLoaded().Remove(OnFilesLoadedHandle);
+		OnFilesLoadedHandle.Reset();
+	}
+
 	if (Server)
 	{
 		Server->Stop();
