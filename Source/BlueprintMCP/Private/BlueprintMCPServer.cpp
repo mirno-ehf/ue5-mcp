@@ -849,6 +849,15 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("loadSublevel")));
 	Router->BindRoute(FHttpPath(TEXT("/api/unload-sublevel")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("unloadSublevel")));
+	// Editor utility tools
+	Router->BindRoute(FHttpPath(TEXT("/api/focus-actor")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("focusActor")));
+	Router->BindRoute(FHttpPath(TEXT("/api/editor-notification")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("editorNotification")));
+	Router->BindRoute(FHttpPath(TEXT("/api/save-all")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("saveAll")));
+	Router->BindRoute(FHttpPath(TEXT("/api/get-dirty-packages")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("getDirtyPackages")));
 
 	// Register TMap dispatch handlers
 	RegisterHandlers();
@@ -1011,6 +1020,7 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("pieTeleportPlayer"),
 		TEXT("loadSublevel"),
 		TEXT("unloadSublevel"),
+		TEXT("saveAll"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -1155,6 +1165,11 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("listSublevels"), [this](const TMap<FString, FString>&, const FString& B) { return HandleListSublevels(B); });
 	HandlerMap.Add(TEXT("loadSublevel"), [this](const TMap<FString, FString>&, const FString& B) { return HandleLoadSublevel(B); });
 	HandlerMap.Add(TEXT("unloadSublevel"), [this](const TMap<FString, FString>&, const FString& B) { return HandleUnloadSublevel(B); });
+	// Editor utility handlers
+	HandlerMap.Add(TEXT("focusActor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleFocusActor(B); });
+	HandlerMap.Add(TEXT("editorNotification"), [this](const TMap<FString, FString>&, const FString& B) { return HandleEditorNotification(B); });
+	HandlerMap.Add(TEXT("saveAll"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSaveAll(B); });
+	HandlerMap.Add(TEXT("getDirtyPackages"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetDirtyPackages(B); });
 }
 
 // ============================================================

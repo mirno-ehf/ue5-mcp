@@ -209,6 +209,11 @@ private:
 	FString HandleListSublevels(const FString& Body);
 	FString HandleLoadSublevel(const FString& Body);
 	FString HandleUnloadSublevel(const FString& Body);
+	// ----- Editor utility tools -----
+	FString HandleFocusActor(const FString& Body);
+	FString HandleEditorNotification(const FString& Body);
+	FString HandleSaveAll(const FString& Body);
+	FString HandleGetDirtyPackages(const FString& Body);
 
 	// ----- Animation Blueprint handlers -----
 	FString HandleCreateAnimBlueprint(const FString& Body);
