@@ -30,6 +30,7 @@ import { registerEditorUtilityTools } from "./tools/editor-utils.js";
 import { registerSelectionTools } from "./tools/selection.js";
 import { registerCVarTools } from "./tools/cvars.js";
 import { registerOutputLogTools } from "./tools/output-log.js";
+import { registerScreenshotTools } from "./tools/screenshot.js";
 
 import { registerBlueprintListResource } from "./resources/blueprint-list.js";
 import { registerWorkflowRecipesResource } from "./resources/workflow-recipes.js";
@@ -64,6 +65,7 @@ registerEditorUtilityTools(server);
 registerSelectionTools(server);
 registerCVarTools(server);
 registerOutputLogTools(server);
+registerScreenshotTools(server);
 
 registerBlueprintListResource(server);
 registerWorkflowRecipesResource(server);

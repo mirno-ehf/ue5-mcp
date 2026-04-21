@@ -877,6 +877,11 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("getOutputLog")));
 	Router->BindRoute(FHttpPath(TEXT("/api/clear-output-log")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("clearOutputLog")));
+	// Screenshot tools
+	Router->BindRoute(FHttpPath(TEXT("/api/take-screenshot")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("takeScreenshot")));
+	Router->BindRoute(FHttpPath(TEXT("/api/take-high-res-screenshot")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("takeHighResScreenshot")));
 
 	// Register TMap dispatch handlers
 	RegisterHandlers();
@@ -1204,6 +1209,9 @@ void FBlueprintMCPServer::RegisterHandlers()
 	// Output log handlers
 	HandlerMap.Add(TEXT("getOutputLog"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetOutputLog(B); });
 	HandlerMap.Add(TEXT("clearOutputLog"), [this](const TMap<FString, FString>&, const FString& B) { return HandleClearOutputLog(B); });
+	// Screenshot handlers
+	HandlerMap.Add(TEXT("takeScreenshot"), [this](const TMap<FString, FString>&, const FString& B) { return HandleTakeScreenshot(B); });
+	HandlerMap.Add(TEXT("takeHighResScreenshot"), [this](const TMap<FString, FString>&, const FString& B) { return HandleTakeHighResScreenshot(B); });
 }
 
 // ============================================================
