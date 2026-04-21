@@ -32,6 +32,8 @@ public class BlueprintMCP : ModuleRules
 			"AnimGraphRuntime",
 			"RHI",
 			"Slate",
+			"UMG",
+			"UMGEditor",
 			"SlateCore"
 		});
 	}

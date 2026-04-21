@@ -34,6 +34,8 @@ import { registerScreenshotTools } from "./tools/screenshot.js";
 import { registerPIELifecycleTools } from "./tools/pie-lifecycle.js";
 import { registerContentBrowserTools } from "./tools/content-browser.js";
 import { registerUndoRedoTools } from "./tools/undo-redo.js";
+import { registerWidgetTools } from "./tools/widgets.js";
+import { registerLevelTools } from "./tools/level.js";
 
 import { registerBlueprintListResource } from "./resources/blueprint-list.js";
 import { registerWorkflowRecipesResource } from "./resources/workflow-recipes.js";
@@ -72,6 +74,8 @@ registerScreenshotTools(server);
 registerPIELifecycleTools(server);
 registerContentBrowserTools(server);
 registerUndoRedoTools(server);
+registerWidgetTools(server);
+registerLevelTools(server);
 
 registerBlueprintListResource(server);
 registerWorkflowRecipesResource(server);

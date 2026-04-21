@@ -134,6 +134,19 @@ export async function createTestMaterialFunction(opts: {
 }
 
 /**
+ * Create a test Widget Blueprint via the HTTP API.
+ */
+export async function createTestWidgetBlueprint(opts: {
+  name: string;
+  packagePath?: string;
+}): Promise<any> {
+  return uePost("/api/create-widget-blueprint", {
+    name: opts.name,
+    packagePath: opts.packagePath ?? "/Game/Test",
+  });
+}
+
+/**
  * Create a test Animation Blueprint via the HTTP API.
  */
 export async function createTestAnimBlueprint(opts: {
