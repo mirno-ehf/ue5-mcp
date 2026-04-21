@@ -24,7 +24,7 @@ FString FBlueprintMCPServer::HandleUndo(const FString& Body)
 		return MakeErrorJson(TEXT("Editor not available."));
 	}
 
-	UTransBuffer* TransBuffer = CastChecked<UTransBuffer>(GEditor->Trans);
+	UTransBuffer* TransBuffer = Cast<UTransBuffer>(GEditor->Trans);
 	if (!TransBuffer)
 	{
 		return MakeErrorJson(TEXT("Transaction buffer not available."));
@@ -76,7 +76,7 @@ FString FBlueprintMCPServer::HandleRedo(const FString& Body)
 		return MakeErrorJson(TEXT("Editor not available."));
 	}
 
-	UTransBuffer* TransBuffer = CastChecked<UTransBuffer>(GEditor->Trans);
+	UTransBuffer* TransBuffer = Cast<UTransBuffer>(GEditor->Trans);
 	if (!TransBuffer)
 	{
 		return MakeErrorJson(TEXT("Transaction buffer not available."));
