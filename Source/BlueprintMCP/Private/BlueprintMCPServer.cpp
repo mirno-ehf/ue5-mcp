@@ -793,6 +793,16 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/exec")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("exec")));
 
+	// Level actor tools
+	Router->BindRoute(FHttpPath(TEXT("/api/attach-actor")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("attachActor")));
+	Router->BindRoute(FHttpPath(TEXT("/api/detach-actor")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("detachActor")));
+	Router->BindRoute(FHttpPath(TEXT("/api/duplicate-actor")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("duplicateActor")));
+	Router->BindRoute(FHttpPath(TEXT("/api/rename-actor")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("renameActor")));
+
 	// Register TMap dispatch handlers
 	RegisterHandlers();
 
@@ -944,6 +954,10 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("addAnimNode"),
 		TEXT("addStateMachine"),
 		TEXT("setStateAnimation"),
+		TEXT("attachActor"),
+		TEXT("detachActor"),
+		TEXT("duplicateActor"),
+		TEXT("renameActor"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -1055,6 +1069,12 @@ void FBlueprintMCPServer::RegisterHandlers()
 
 	// Console command execution
 	HandlerMap.Add(TEXT("exec"),                    [this](const TMap<FString, FString>&, const FString& B) { return HandleExecCommand(B); });
+
+	// Level actor handlers
+	HandlerMap.Add(TEXT("attachActor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleAttachActor(B); });
+	HandlerMap.Add(TEXT("detachActor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleDetachActor(B); });
+	HandlerMap.Add(TEXT("duplicateActor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleDuplicateActor(B); });
+	HandlerMap.Add(TEXT("renameActor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleRenameActor(B); });
 }
 
 // ============================================================
