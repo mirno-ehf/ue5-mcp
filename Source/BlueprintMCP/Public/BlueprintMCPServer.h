@@ -204,6 +204,11 @@ private:
 	FString HandlePIEGetPlayerTransform(const FString& Body);
 	FString HandlePIETeleportPlayer(const FString& Body);
 	FString HandlePIEQueryActors(const FString& Body);
+	// ----- Sublevel tools -----
+	FString HandleGetLevelInfo(const FString& Body);
+	FString HandleListSublevels(const FString& Body);
+	FString HandleLoadSublevel(const FString& Body);
+	FString HandleUnloadSublevel(const FString& Body);
 
 	// ----- Animation Blueprint handlers -----
 	FString HandleCreateAnimBlueprint(const FString& Body);

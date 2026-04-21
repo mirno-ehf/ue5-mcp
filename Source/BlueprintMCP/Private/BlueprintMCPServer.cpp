@@ -840,6 +840,15 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("pieTeleportPlayer")));
 	Router->BindRoute(FHttpPath(TEXT("/api/pie-query-actors")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("pieQueryActors")));
+	// Sublevel tools
+	Router->BindRoute(FHttpPath(TEXT("/api/get-level-info")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("getLevelInfo")));
+	Router->BindRoute(FHttpPath(TEXT("/api/list-sublevels")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("listSublevels")));
+	Router->BindRoute(FHttpPath(TEXT("/api/load-sublevel")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("loadSublevel")));
+	Router->BindRoute(FHttpPath(TEXT("/api/unload-sublevel")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("unloadSublevel")));
 
 	// Register TMap dispatch handlers
 	RegisterHandlers();
@@ -1000,6 +1009,8 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("setViewportCamera"),
 		TEXT("setViewMode"),
 		TEXT("pieTeleportPlayer"),
+		TEXT("loadSublevel"),
+		TEXT("unloadSublevel"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -1139,6 +1150,11 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("pieGetPlayerTransform"), [this](const TMap<FString, FString>&, const FString& B) { return HandlePIEGetPlayerTransform(B); });
 	HandlerMap.Add(TEXT("pieTeleportPlayer"), [this](const TMap<FString, FString>&, const FString& B) { return HandlePIETeleportPlayer(B); });
 	HandlerMap.Add(TEXT("pieQueryActors"), [this](const TMap<FString, FString>&, const FString& B) { return HandlePIEQueryActors(B); });
+	// Sublevel handlers
+	HandlerMap.Add(TEXT("getLevelInfo"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetLevelInfo(B); });
+	HandlerMap.Add(TEXT("listSublevels"), [this](const TMap<FString, FString>&, const FString& B) { return HandleListSublevels(B); });
+	HandlerMap.Add(TEXT("loadSublevel"), [this](const TMap<FString, FString>&, const FString& B) { return HandleLoadSublevel(B); });
+	HandlerMap.Add(TEXT("unloadSublevel"), [this](const TMap<FString, FString>&, const FString& B) { return HandleUnloadSublevel(B); });
 }
 
 // ============================================================

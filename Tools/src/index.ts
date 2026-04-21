@@ -25,6 +25,7 @@ import { registerSpatialTools } from "./tools/spatial.js";
 import { registerCameraTools } from "./tools/camera.js";
 import { registerViewModeTools } from "./tools/view-mode.js";
 import { registerPIERuntimeTools } from "./tools/pie-runtime.js";
+import { registerSublevelTools } from "./tools/sublevels.js";
 
 import { registerBlueprintListResource } from "./resources/blueprint-list.js";
 import { registerWorkflowRecipesResource } from "./resources/workflow-recipes.js";
@@ -54,6 +55,7 @@ registerSpatialTools(server);
 registerCameraTools(server);
 registerViewModeTools(server);
 registerPIERuntimeTools(server);
+registerSublevelTools(server);
 
 registerBlueprintListResource(server);
 registerWorkflowRecipesResource(server);
