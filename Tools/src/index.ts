@@ -32,6 +32,7 @@ import { registerCVarTools } from "./tools/cvars.js";
 import { registerOutputLogTools } from "./tools/output-log.js";
 import { registerScreenshotTools } from "./tools/screenshot.js";
 import { registerPIELifecycleTools } from "./tools/pie-lifecycle.js";
+import { registerContentBrowserTools } from "./tools/content-browser.js";
 
 import { registerBlueprintListResource } from "./resources/blueprint-list.js";
 import { registerWorkflowRecipesResource } from "./resources/workflow-recipes.js";
@@ -68,6 +69,7 @@ registerCVarTools(server);
 registerOutputLogTools(server);
 registerScreenshotTools(server);
 registerPIELifecycleTools(server);
+registerContentBrowserTools(server);
 
 registerBlueprintListResource(server);
 registerWorkflowRecipesResource(server);

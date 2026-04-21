@@ -891,6 +891,11 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("isPIERunning")));
 	Router->BindRoute(FHttpPath(TEXT("/api/pie-pause")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("piePause")));
+	// Content browser tools
+	Router->BindRoute(FHttpPath(TEXT("/api/navigate-content-browser")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("navigateContentBrowser")));
+	Router->BindRoute(FHttpPath(TEXT("/api/open-asset-editor")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("openAssetEditor")));
 
 	// Register TMap dispatch handlers
 	RegisterHandlers();
@@ -1227,6 +1232,9 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("stopPIE"), [this](const TMap<FString, FString>&, const FString& B) { return HandleStopPIE(B); });
 	HandlerMap.Add(TEXT("isPIERunning"), [this](const TMap<FString, FString>&, const FString& B) { return HandleIsPIERunning(B); });
 	HandlerMap.Add(TEXT("piePause"), [this](const TMap<FString, FString>&, const FString& B) { return HandlePIEPause(B); });
+	// Content browser handlers
+	HandlerMap.Add(TEXT("navigateContentBrowser"), [this](const TMap<FString, FString>&, const FString& B) { return HandleNavigateContentBrowser(B); });
+	HandlerMap.Add(TEXT("openAssetEditor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleOpenAssetEditor(B); });
 }
 
 // ============================================================

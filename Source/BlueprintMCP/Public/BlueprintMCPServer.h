@@ -233,6 +233,9 @@ private:
 	FString HandleStopPIE(const FString& Body);
 	FString HandleIsPIERunning(const FString& Body);
 	FString HandlePIEPause(const FString& Body);
+	// ----- Content browser tools -----
+	FString HandleNavigateContentBrowser(const FString& Body);
+	FString HandleOpenAssetEditor(const FString& Body);
 
 	// ----- Animation Blueprint handlers -----
 	FString HandleCreateAnimBlueprint(const FString& Body);
