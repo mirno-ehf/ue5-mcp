@@ -81,8 +81,8 @@ FString FBlueprintMCPServer::HandleTakeScreenshot(const FString& Body)
 		return MakeErrorJson(TEXT("Failed to read pixels from viewport."));
 	}
 
-	// Save as PNG
-	TArray<uint8> PngData;
+	// Save as PNG (PNGCompressImageArray requires TArray64 in UE 5.7)
+	TArray64<uint8> PngData;
 	FImageUtils::PNGCompressImageArray(Width, Height, Bitmap, PngData);
 
 	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();

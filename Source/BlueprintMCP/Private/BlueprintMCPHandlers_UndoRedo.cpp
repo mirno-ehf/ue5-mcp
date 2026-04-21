@@ -6,6 +6,18 @@
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 
+// Helpers for UTransBuffer in UE 5.7: UndoCount is the number of
+// transactions already undone (redoable), not the number available
+// to undo. There is no GetRedoCount().
+static int32 AvailableUndoCount(const UTransBuffer* T)
+{
+	return T ? T->UndoBuffer.Num() - T->GetUndoCount() : 0;
+}
+static int32 AvailableRedoCount(const UTransBuffer* T)
+{
+	return T ? T->GetUndoCount() : 0;
+}
+
 // ============================================================
 // HandleUndo — undo the last editor action
 // ============================================================
@@ -30,17 +42,12 @@ FString FBlueprintMCPServer::HandleUndo(const FString& Body)
 		return MakeErrorJson(TEXT("Transaction buffer not available."));
 	}
 
-	if (TransBuffer->GetUndoCount() == 0)
+	if (AvailableUndoCount(TransBuffer) == 0)
 	{
 		return MakeErrorJson(TEXT("Nothing to undo."));
 	}
 
-	// Get the description of what we're about to undo
-	FString UndoDescription;
-	if (TransBuffer->GetUndoCount() > 0)
-	{
-		UndoDescription = TransBuffer->GetUndoContext(false).Title.ToString();
-	}
+	FString UndoDescription = TransBuffer->GetUndoContext(false).Title.ToString();
 
 	bool bSuccess = GEditor->UndoTransaction();
 
@@ -52,8 +59,8 @@ FString FBlueprintMCPServer::HandleUndo(const FString& Body)
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), bSuccess);
 	Result->SetStringField(TEXT("undoneAction"), UndoDescription);
-	Result->SetNumberField(TEXT("remainingUndoCount"), TransBuffer->GetUndoCount());
-	Result->SetNumberField(TEXT("redoCount"), TransBuffer->GetRedoCount());
+	Result->SetNumberField(TEXT("remainingUndoCount"), AvailableUndoCount(TransBuffer));
+	Result->SetNumberField(TEXT("redoCount"), AvailableRedoCount(TransBuffer));
 
 	return JsonToString(Result);
 }
@@ -82,17 +89,12 @@ FString FBlueprintMCPServer::HandleRedo(const FString& Body)
 		return MakeErrorJson(TEXT("Transaction buffer not available."));
 	}
 
-	if (TransBuffer->GetRedoCount() == 0)
+	if (AvailableRedoCount(TransBuffer) == 0)
 	{
 		return MakeErrorJson(TEXT("Nothing to redo."));
 	}
 
-	// Get the description of what we're about to redo
-	FString RedoDescription;
-	if (TransBuffer->GetRedoCount() > 0)
-	{
-		RedoDescription = TransBuffer->GetUndoContext(true).Title.ToString();
-	}
+	FString RedoDescription = TransBuffer->GetUndoContext(true).Title.ToString();
 
 	bool bSuccess = GEditor->RedoTransaction();
 
@@ -104,8 +106,8 @@ FString FBlueprintMCPServer::HandleRedo(const FString& Body)
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), bSuccess);
 	Result->SetStringField(TEXT("redoneAction"), RedoDescription);
-	Result->SetNumberField(TEXT("undoCount"), TransBuffer->GetUndoCount());
-	Result->SetNumberField(TEXT("remainingRedoCount"), TransBuffer->GetRedoCount());
+	Result->SetNumberField(TEXT("undoCount"), AvailableUndoCount(TransBuffer));
+	Result->SetNumberField(TEXT("remainingRedoCount"), AvailableRedoCount(TransBuffer));
 
 	return JsonToString(Result);
 }

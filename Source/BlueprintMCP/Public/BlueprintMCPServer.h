@@ -181,6 +181,11 @@ private:
 	FString HandleDuplicateActor(const FString& Body);
 	FString HandleRenameActor(const FString& Body);
 
+	// ----- Actor state tools -----
+	FString HandleSetActorMobility(const FString& Body);
+	FString HandleSetActorVisibility(const FString& Body);
+	FString HandleSetActorPhysics(const FString& Body);
+
 	// ----- Actor query tools -----
 	FString HandleFindActorsByTag(const FString& Body);
 	FString HandleFindActorsByClass(const FString& Body);

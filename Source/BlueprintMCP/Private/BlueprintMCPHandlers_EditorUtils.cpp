@@ -6,6 +6,7 @@
 #include "LevelEditorViewport.h"
 #include "FileHelpers.h"
 #include "UObject/Package.h"
+#include "Misc/PackageName.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonWriter.h"
@@ -217,7 +218,12 @@ FString FBlueprintMCPServer::HandleGetDirtyPackages(const FString& Body)
 
 		TSharedRef<FJsonObject> PkgObj = MakeShared<FJsonObject>();
 		PkgObj->SetStringField(TEXT("name"), Package->GetName());
-		PkgObj->SetStringField(TEXT("fileName"), Package->FileName.ToString());
+
+		FString ResolvedFileName;
+		if (FPackageName::DoesPackageExist(Package->GetName(), &ResolvedFileName))
+		{
+			PkgObj->SetStringField(TEXT("fileName"), ResolvedFileName);
+		}
 
 		PackageArray.Add(MakeShared<FJsonValueObject>(PkgObj));
 	}

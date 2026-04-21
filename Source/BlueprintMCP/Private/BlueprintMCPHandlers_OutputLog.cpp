@@ -138,12 +138,12 @@ FString FBlueprintMCPServer::HandleGetOutputLog(const FString& Body)
 			continue;
 		}
 
-		TSharedRef<FJsonObject> LogObj = MakeShared<FJsonObject>();
-		LogObj->SetStringField(TEXT("message"), Entry.Message);
-		LogObj->SetStringField(TEXT("category"), Entry.Category);
-		LogObj->SetStringField(TEXT("verbosity"), VerbosityToString(Entry.Verbosity));
+		TSharedRef<FJsonObject> EntryObj = MakeShared<FJsonObject>();
+		EntryObj->SetStringField(TEXT("message"), Entry.Message);
+		EntryObj->SetStringField(TEXT("category"), Entry.Category);
+		EntryObj->SetStringField(TEXT("verbosity"), VerbosityToString(Entry.Verbosity));
 
-		LogArray.Insert(MakeShared<FJsonValueObject>(LogObj), 0); // Insert at front to maintain order
+		LogArray.Insert(MakeShared<FJsonValueObject>(EntryObj), 0); // Insert at front to maintain order
 	}
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();

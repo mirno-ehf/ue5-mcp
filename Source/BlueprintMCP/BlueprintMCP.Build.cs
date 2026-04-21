@@ -30,7 +30,9 @@ public class BlueprintMCP : ModuleRules
 			"MaterialEditor",
 			"AnimGraph",
 			"AnimGraphRuntime",
-			"RHI"
+			"RHI",
+			"Slate",
+			"SlateCore"
 		});
 	}
 }
