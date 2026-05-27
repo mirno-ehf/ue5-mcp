@@ -3,6 +3,7 @@
 #include "Editor/UnrealEdEngine.h"
 #include "UnrealEdGlobals.h"
 #include "LevelEditor.h"
+#include "Settings/LevelEditorPlaySettings.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonWriter.h"
@@ -36,11 +37,43 @@ FString FBlueprintMCPServer::HandleStartPIE(const FString& Body)
 	Params.WorldType = EPlaySessionWorldType::PlayInEditor;
 	Params.DestinationSlateViewport = nullptr; // Use default
 
+	// Optional: play a specific map regardless of the open editor level.
+	FString MapOverride;
+	int32 WindowWidth = 0;
+	int32 WindowHeight = 0;
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (Json.IsValid())
+	{
+		if (Json->TryGetStringField(TEXT("map"), MapOverride) && !MapOverride.IsEmpty())
+		{
+			Params.GlobalMapOverride = MapOverride;
+		}
+		Json->TryGetNumberField(TEXT("width"), WindowWidth);
+		Json->TryGetNumberField(TEXT("height"), WindowHeight);
+	}
+
+	// Optional: force a sized floating PIE window (e.g. ultra-wide testing).
+	if (WindowWidth > 0 && WindowHeight > 0)
+	{
+		ULevelEditorPlaySettings* PlaySettings = GetMutableDefault<ULevelEditorPlaySettings>();
+		PlaySettings->NewWindowWidth = WindowWidth;
+		PlaySettings->NewWindowHeight = WindowHeight;
+		PlaySettings->CenterNewWindow = true;
+		PlaySettings->SetPlayNumberOfClients(1);
+		// Force "new editor window" mode so the size is honoured.
+		Params.SessionDestination = EPlaySessionDestinationType::InProcess;
+		PlaySettings->LastExecutedPlayModeType = EPlayModeType::PlayMode_InEditorFloating;
+	}
+
 	GUnrealEd->RequestPlaySession(Params);
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), true);
 	Result->SetStringField(TEXT("status"), TEXT("PIE session requested. It may take a moment to start."));
+	if (!MapOverride.IsEmpty())
+	{
+		Result->SetStringField(TEXT("map"), MapOverride);
+	}
 
 	return JsonToString(Result);
 }

@@ -1965,15 +1965,34 @@ FString FBlueprintMCPServer::HandleRenameAsset(const FString& Body)
 
 	// We need to load the asset to get the object
 	FAssetData* FoundAsset = FindAnyAsset(AssetPath);
-	if (!FoundAsset)
+	UObject* AssetObj = nullptr;
+	if (FoundAsset)
 	{
-		return MakeErrorJson(FString::Printf(TEXT("Asset '%s' not found. Checked Blueprints, Materials, Material Instances, and Material Functions."), *AssetPath));
+		AssetObj = FoundAsset->GetAsset();
+	}
+	else
+	{
+		// Fallback: query the asset registry by package path so we can rename any
+		// asset class (Texture2D, USkeleton, USkeletalMesh, etc.) — not only the
+		// types FindAnyAsset knows about.
+		IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+		FString ObjectPath = AssetPath;
+		if (!ObjectPath.Contains(TEXT(".")))
+		{
+			FString Leaf;
+			ObjectPath.Split(TEXT("/"), nullptr, &Leaf, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+			ObjectPath = AssetPath + TEXT(".") + Leaf;
+		}
+		FAssetData AD = AR.GetAssetByObjectPath(FSoftObjectPath(ObjectPath));
+		if (AD.IsValid())
+		{
+			AssetObj = AD.GetAsset();
+		}
 	}
 
-	UObject* AssetObj = FoundAsset->GetAsset();
 	if (!AssetObj)
 	{
-		return MakeErrorJson(FString::Printf(TEXT("Failed to load asset '%s'"), *AssetPath));
+		return MakeErrorJson(FString::Printf(TEXT("Asset '%s' not found or could not be loaded."), *AssetPath));
 	}
 
 	// Parse new path into package path and asset name

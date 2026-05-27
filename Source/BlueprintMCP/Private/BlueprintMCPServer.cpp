@@ -576,6 +576,16 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 		QueuedHandler(TEXT("deleteAsset")));
 	Router->BindRoute(FHttpPath(TEXT("/api/test-save")), EHttpServerRequestVerbs::VERB_GET,
 		QueuedHandler(TEXT("testSave")));
+	Router->BindRoute(FHttpPath(TEXT("/api/skeleton")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("skeleton")));
+	Router->BindRoute(FHttpPath(TEXT("/api/add-skeleton-socket")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("addSkeletonSocket")));
+	Router->BindRoute(FHttpPath(TEXT("/api/remove-skeleton-socket")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("removeSkeletonSocket")));
+	Router->BindRoute(FHttpPath(TEXT("/api/copy-skeleton-sockets")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("copySkeletonSockets")));
+	Router->BindRoute(FHttpPath(TEXT("/api/rebuild-groom-bindings")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("rebuildGroomBindings")));
 	Router->BindRoute(FHttpPath(TEXT("/api/connect-pins")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("connectPins")));
 	Router->BindRoute(FHttpPath(TEXT("/api/disconnect-pin")), EHttpServerRequestVerbs::VERB_POST,
@@ -789,157 +799,39 @@ bool FBlueprintMCPServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/set-state-blend-space")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("setStateBlendSpace")));
 
+	// Mirror Data Table editing
+	Router->BindRoute(FHttpPath(TEXT("/api/list-mirror-table-rows")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("listMirrorTableRows")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-mirror-table-rows")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setMirrorTableRows")));
+	Router->BindRoute(FHttpPath(TEXT("/api/remove-mirror-table-rows")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("removeMirrorTableRows")));
+
+	// Groom Binding asset tools
+	Router->BindRoute(FHttpPath(TEXT("/api/list-groom-bindings")), EHttpServerRequestVerbs::VERB_GET,
+		QueuedHandler(TEXT("listGroomBindings")));
+	Router->BindRoute(FHttpPath(TEXT("/api/duplicate-groom-binding")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("duplicateGroomBinding")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-groom-binding-target-mesh")), EHttpServerRequestVerbs::VERB_POST,
+		QueuedHandler(TEXT("setGroomBindingTargetMesh")));
+
 	// Console command execution
 	Router->BindRoute(FHttpPath(TEXT("/api/exec")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("exec")));
 
-	// Level actor tools
-	Router->BindRoute(FHttpPath(TEXT("/api/attach-actor")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("attachActor")));
-	Router->BindRoute(FHttpPath(TEXT("/api/detach-actor")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("detachActor")));
-	Router->BindRoute(FHttpPath(TEXT("/api/duplicate-actor")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("duplicateActor")));
-	Router->BindRoute(FHttpPath(TEXT("/api/rename-actor")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("renameActor")));
-
-	// Actor query tools
-	Router->BindRoute(FHttpPath(TEXT("/api/find-actors-by-tag")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("findActorsByTag")));
-	Router->BindRoute(FHttpPath(TEXT("/api/find-actors-by-class")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("findActorsByClass")));
-	Router->BindRoute(FHttpPath(TEXT("/api/find-actors-in-radius")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("findActorsInRadius")));
-	Router->BindRoute(FHttpPath(TEXT("/api/get-actor-bounds")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("getActorBounds")));
-	Router->BindRoute(FHttpPath(TEXT("/api/set-actor-tags")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("setActorTags")));
-	// Spatial tools
-	Router->BindRoute(FHttpPath(TEXT("/api/raycast")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("raycast")));
-	// Camera tools
-	Router->BindRoute(FHttpPath(TEXT("/api/get-viewport-camera")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("getViewportCamera")));
-	Router->BindRoute(FHttpPath(TEXT("/api/set-viewport-camera")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("setViewportCamera")));
-	// View mode tools
-	Router->BindRoute(FHttpPath(TEXT("/api/set-view-mode")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("setViewMode")));
-	Router->BindRoute(FHttpPath(TEXT("/api/set-show-flags")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("setShowFlags")));
-	Router->BindRoute(FHttpPath(TEXT("/api/set-viewport-type")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("setViewportType")));
-	Router->BindRoute(FHttpPath(TEXT("/api/set-realtime-rendering")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("setRealtimeRendering")));
-	Router->BindRoute(FHttpPath(TEXT("/api/set-game-view")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("setGameView")));
-	// PIE runtime tools
-	Router->BindRoute(FHttpPath(TEXT("/api/pie-get-player-transform")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("pieGetPlayerTransform")));
-	Router->BindRoute(FHttpPath(TEXT("/api/pie-teleport-player")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("pieTeleportPlayer")));
-	Router->BindRoute(FHttpPath(TEXT("/api/pie-query-actors")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("pieQueryActors")));
-	// Sublevel tools
-	Router->BindRoute(FHttpPath(TEXT("/api/get-level-info")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("getLevelInfo")));
-	Router->BindRoute(FHttpPath(TEXT("/api/list-sublevels")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("listSublevels")));
-	Router->BindRoute(FHttpPath(TEXT("/api/load-sublevel")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("loadSublevel")));
-	Router->BindRoute(FHttpPath(TEXT("/api/unload-sublevel")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("unloadSublevel")));
-	// Editor utility tools
-	Router->BindRoute(FHttpPath(TEXT("/api/focus-actor")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("focusActor")));
-	Router->BindRoute(FHttpPath(TEXT("/api/editor-notification")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("editorNotification")));
-	Router->BindRoute(FHttpPath(TEXT("/api/save-all")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("saveAll")));
-	Router->BindRoute(FHttpPath(TEXT("/api/get-dirty-packages")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("getDirtyPackages")));
-	// Selection tools
-	Router->BindRoute(FHttpPath(TEXT("/api/get-editor-selection")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("getEditorSelection")));
-	Router->BindRoute(FHttpPath(TEXT("/api/set-editor-selection")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("setEditorSelection")));
-	Router->BindRoute(FHttpPath(TEXT("/api/clear-selection")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("clearSelection")));
-	// CVar tools
-	Router->BindRoute(FHttpPath(TEXT("/api/get-cvar")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("getCVar")));
-	Router->BindRoute(FHttpPath(TEXT("/api/set-cvar")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("setCVar")));
-	Router->BindRoute(FHttpPath(TEXT("/api/list-cvars")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("listCVars")));
-	// Output log tools
-	Router->BindRoute(FHttpPath(TEXT("/api/get-output-log")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("getOutputLog")));
-	Router->BindRoute(FHttpPath(TEXT("/api/clear-output-log")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("clearOutputLog")));
-	// Screenshot tools
+	// Viewport screenshots
 	Router->BindRoute(FHttpPath(TEXT("/api/take-screenshot")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("takeScreenshot")));
 	Router->BindRoute(FHttpPath(TEXT("/api/take-high-res-screenshot")), EHttpServerRequestVerbs::VERB_POST,
 		QueuedHandler(TEXT("takeHighResScreenshot")));
-	// PIE lifecycle tools
+
+	// PIE control
 	Router->BindRoute(FHttpPath(TEXT("/api/start-pie")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("startPIE")));
+		QueuedHandler(TEXT("startPie")));
 	Router->BindRoute(FHttpPath(TEXT("/api/stop-pie")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("stopPIE")));
+		QueuedHandler(TEXT("stopPie")));
 	Router->BindRoute(FHttpPath(TEXT("/api/is-pie-running")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("isPIERunning")));
-	Router->BindRoute(FHttpPath(TEXT("/api/pie-pause")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("piePause")));
-	// Content browser tools
-	Router->BindRoute(FHttpPath(TEXT("/api/navigate-content-browser")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("navigateContentBrowser")));
-	Router->BindRoute(FHttpPath(TEXT("/api/open-asset-editor")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("openAssetEditor")));
-	// Undo/Redo tools
-	Router->BindRoute(FHttpPath(TEXT("/api/undo")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("undo")));
-	Router->BindRoute(FHttpPath(TEXT("/api/redo")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("redo")));
-	Router->BindRoute(FHttpPath(TEXT("/api/begin-transaction")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("beginTransaction")));
-	Router->BindRoute(FHttpPath(TEXT("/api/end-transaction")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("endTransaction")));
-	// Widget Blueprint tools
-	Router->BindRoute(FHttpPath(TEXT("/api/list-widget-tree")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("listWidgetTree")));
-	Router->BindRoute(FHttpPath(TEXT("/api/get-widget-properties")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("getWidgetProperties")));
-	Router->BindRoute(FHttpPath(TEXT("/api/add-widget")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("addWidget")));
-	Router->BindRoute(FHttpPath(TEXT("/api/remove-widget")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("removeWidget")));
-	Router->BindRoute(FHttpPath(TEXT("/api/set-widget-property")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("setWidgetProperty")));
-	Router->BindRoute(FHttpPath(TEXT("/api/move-widget")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("moveWidget")));
-	Router->BindRoute(FHttpPath(TEXT("/api/create-widget-blueprint")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("createWidgetBlueprint")));
-
-	// Level actor tools (read)
-	Router->BindRoute(FHttpPath(TEXT("/api/current-level")), EHttpServerRequestVerbs::VERB_GET,
-		QueuedHandler(TEXT("current-level")));
-	Router->BindRoute(FHttpPath(TEXT("/api/list-actors")), EHttpServerRequestVerbs::VERB_GET,
-		QueuedHandler(TEXT("list-actors")));
-	Router->BindRoute(FHttpPath(TEXT("/api/actor-properties")), EHttpServerRequestVerbs::VERB_GET,
-		QueuedHandler(TEXT("actor-properties")));
-	Router->BindRoute(FHttpPath(TEXT("/api/selected-actors")), EHttpServerRequestVerbs::VERB_GET,
-		QueuedHandler(TEXT("selected-actors")));
-
-	// Level actor tools (write)
-	Router->BindRoute(FHttpPath(TEXT("/api/set-actor-transform")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("set-actor-transform")));
-	Router->BindRoute(FHttpPath(TEXT("/api/set-actor-property")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("set-actor-property")));
-	Router->BindRoute(FHttpPath(TEXT("/api/spawn-actor")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("spawn-actor")));
-	Router->BindRoute(FHttpPath(TEXT("/api/delete-actor")), EHttpServerRequestVerbs::VERB_POST,
-		QueuedHandler(TEXT("delete-actor")));
+		QueuedHandler(TEXT("isPieRunning")));
 
 	// Register TMap dispatch handlers
 	RegisterHandlers();
@@ -1004,22 +896,16 @@ bool FBlueprintMCPServer::ProcessOneRequest()
 	FString Response;
 	if (FRequestHandler* Handler = HandlerMap.Find(Req->Endpoint))
 	{
-		// Wrap mutation endpoints in an undo transaction so users can Ctrl+Z.
-		// Widget Blueprint mutations are EXCLUDED because BP recompilation creates
-		// REINST_ objects whose WidgetTree references get trapped in the TransBuffer,
-		// preventing the old World from being garbage-collected (fatal "World Leak"
-		// crash in ReferenceChainSearch.cpp). Widget tools use snapshot/restore instead.
+		// Wrap mutation endpoints in an undo transaction so users can Ctrl+Z
 		const bool bIsMutation = MutationEndpoints.Contains(Req->Endpoint);
-		const bool bIsWidgetMutation = WidgetMutationEndpoints.Contains(Req->Endpoint);
-		const bool bUseTransaction = bIsMutation && !bIsWidgetMutation && GEditor != nullptr;
-		if (bUseTransaction)
+		if (bIsMutation && GEditor)
 		{
 			GEditor->BeginTransaction(FText::FromString(FString::Printf(TEXT("BlueprintMCP: %s"), *Req->Endpoint)));
 		}
 
 		Response = (*Handler)(Req->QueryParams, Req->Body);
 
-		if (bUseTransaction)
+		if (bIsMutation && GEditor)
 		{
 			GEditor->EndTransaction();
 		}
@@ -1098,45 +984,14 @@ void FBlueprintMCPServer::RegisterHandlers()
 		TEXT("addAnimNode"),
 		TEXT("addStateMachine"),
 		TEXT("setStateAnimation"),
-		TEXT("attachActor"),
-		TEXT("detachActor"),
-		TEXT("duplicateActor"),
-		TEXT("renameActor"),
-		TEXT("setActorTags"),
-		TEXT("setViewportCamera"),
-		TEXT("setViewMode"),
-		TEXT("pieTeleportPlayer"),
-		TEXT("loadSublevel"),
-		TEXT("unloadSublevel"),
-		TEXT("saveAll"),
-		TEXT("setEditorSelection"),
-		TEXT("clearSelection"),
-		TEXT("setCVar"),
-		TEXT("clearOutputLog"),
-		TEXT("startPIE"),
-		TEXT("undo"),
-		TEXT("redo"),
-		TEXT("addWidget"),
-		TEXT("removeWidget"),
-		TEXT("setWidgetProperty"),
-		TEXT("moveWidget"),
-		TEXT("createWidgetBlueprint"),
-		// Level actor mutations
-		TEXT("set-actor-transform"),
-		TEXT("set-actor-property"),
-		TEXT("spawn-actor"),
-		TEXT("delete-actor"),
-	};
-
-	// Widget mutations that must NOT be wrapped in undo transactions.
-	// Recompilation of Widget Blueprints creates REINST_ objects whose
-	// WidgetTree refs in the TransBuffer prevent World GC → fatal crash.
-	WidgetMutationEndpoints = {
-		TEXT("addWidget"),
-		TEXT("removeWidget"),
-		TEXT("setWidgetProperty"),
-		TEXT("moveWidget"),
-		TEXT("createWidgetBlueprint"),
+		TEXT("setMirrorTableRows"),
+		TEXT("removeMirrorTableRows"),
+		TEXT("duplicateGroomBinding"),
+		TEXT("setGroomBindingTargetMesh"),
+		TEXT("addSkeletonSocket"),
+		TEXT("removeSkeletonSocket"),
+		TEXT("copySkeletonSockets"),
+		TEXT("rebuildGroomBindings"),
 	};
 
 	// GET handlers (use QueryParams, ignore Body)
@@ -1146,6 +1001,11 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("references"),        [this](const TMap<FString, FString>& P, const FString&) { return HandleFindReferences(P); });
 	HandlerMap.Add(TEXT("testSave"),          [this](const TMap<FString, FString>& P, const FString&) { return HandleTestSave(P); });
 	HandlerMap.Add(TEXT("searchByType"),      [this](const TMap<FString, FString>& P, const FString&) { return HandleSearchByType(P); });
+	HandlerMap.Add(TEXT("skeleton"),          [this](const TMap<FString, FString>& P, const FString&) { return HandleGetSkeleton(P); });
+	HandlerMap.Add(TEXT("addSkeletonSocket"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleAddSkeletonSocket(B); });
+	HandlerMap.Add(TEXT("removeSkeletonSocket"), [this](const TMap<FString, FString>&, const FString& B) { return HandleRemoveSkeletonSocket(B); });
+	HandlerMap.Add(TEXT("copySkeletonSockets"),  [this](const TMap<FString, FString>&, const FString& B) { return HandleCopySkeletonSockets(B); });
+	HandlerMap.Add(TEXT("rebuildGroomBindings"), [this](const TMap<FString, FString>&, const FString& B) { return HandleRebuildGroomBindings(B); });
 
 	// Rescan handler (game thread, no body needed)
 	HandlerMap.Add(TEXT("rescan"), [this](const TMap<FString, FString>&, const FString&) { return HandleRescan(); });
@@ -1240,97 +1100,31 @@ void FBlueprintMCPServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("addAnimNode"),             [this](const TMap<FString, FString>&, const FString& B) { return HandleAddAnimNode(B); });
 	HandlerMap.Add(TEXT("addStateMachine"),         [this](const TMap<FString, FString>&, const FString& B) { return HandleAddStateMachine(B); });
 	HandlerMap.Add(TEXT("setStateAnimation"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleSetStateAnimation(B); });
+	HandlerMap.Add(TEXT("listMirrorTableRows"),     [this](const TMap<FString, FString>&, const FString& B) { return HandleListMirrorTableRows(B); });
+	HandlerMap.Add(TEXT("setMirrorTableRows"),      [this](const TMap<FString, FString>&, const FString& B) { return HandleSetMirrorTableRows(B); });
+	HandlerMap.Add(TEXT("removeMirrorTableRows"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleRemoveMirrorTableRows(B); });
 	HandlerMap.Add(TEXT("listAnimSlots"),           [this](const TMap<FString, FString>&, const FString& B) { return HandleListAnimSlots(B); });
 	HandlerMap.Add(TEXT("listSyncGroups"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleListSyncGroups(B); });
 	HandlerMap.Add(TEXT("createBlendSpace"),        [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateBlendSpace(B); });
 	HandlerMap.Add(TEXT("setBlendSpaceSamples"),    [this](const TMap<FString, FString>&, const FString& B) { return HandleSetBlendSpaceSamples(B); });
 	HandlerMap.Add(TEXT("setStateBlendSpace"),      [this](const TMap<FString, FString>&, const FString& B) { return HandleSetStateBlendSpace(B); });
 
+	// Groom Binding asset tools
+	HandlerMap.Add(TEXT("listGroomBindings"),          [this](const TMap<FString, FString>& P, const FString&) { return HandleListGroomBindings(P); });
+	HandlerMap.Add(TEXT("duplicateGroomBinding"),      [this](const TMap<FString, FString>&, const FString& B) { return HandleDuplicateGroomBinding(B); });
+	HandlerMap.Add(TEXT("setGroomBindingTargetMesh"),  [this](const TMap<FString, FString>&, const FString& B) { return HandleSetGroomBindingTargetMesh(B); });
+
 	// Console command execution
 	HandlerMap.Add(TEXT("exec"),                    [this](const TMap<FString, FString>&, const FString& B) { return HandleExecCommand(B); });
 
-	// Level actor handlers
-	HandlerMap.Add(TEXT("attachActor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleAttachActor(B); });
-	HandlerMap.Add(TEXT("detachActor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleDetachActor(B); });
-	HandlerMap.Add(TEXT("duplicateActor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleDuplicateActor(B); });
-	HandlerMap.Add(TEXT("renameActor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleRenameActor(B); });
+	// Viewport screenshots
+	HandlerMap.Add(TEXT("takeScreenshot"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleTakeScreenshot(B); });
+	HandlerMap.Add(TEXT("takeHighResScreenshot"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleTakeHighResScreenshot(B); });
 
-	// Actor query handlers
-	HandlerMap.Add(TEXT("findActorsByTag"), [this](const TMap<FString, FString>&, const FString& B) { return HandleFindActorsByTag(B); });
-	HandlerMap.Add(TEXT("findActorsByClass"), [this](const TMap<FString, FString>&, const FString& B) { return HandleFindActorsByClass(B); });
-	HandlerMap.Add(TEXT("findActorsInRadius"), [this](const TMap<FString, FString>&, const FString& B) { return HandleFindActorsInRadius(B); });
-	HandlerMap.Add(TEXT("getActorBounds"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetActorBounds(B); });
-	HandlerMap.Add(TEXT("setActorTags"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetActorTags(B); });
-	// Spatial handlers
-	HandlerMap.Add(TEXT("raycast"), [this](const TMap<FString, FString>&, const FString& B) { return HandleRaycast(B); });
-	// Camera handlers
-	HandlerMap.Add(TEXT("getViewportCamera"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetViewportCamera(B); });
-	HandlerMap.Add(TEXT("setViewportCamera"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetViewportCamera(B); });
-	// View mode handlers
-	HandlerMap.Add(TEXT("setViewMode"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetViewMode(B); });
-	HandlerMap.Add(TEXT("setShowFlags"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetShowFlags(B); });
-	HandlerMap.Add(TEXT("setViewportType"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetViewportType(B); });
-	HandlerMap.Add(TEXT("setRealtimeRendering"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetRealtimeRendering(B); });
-	HandlerMap.Add(TEXT("setGameView"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetGameView(B); });
-	// PIE runtime handlers
-	HandlerMap.Add(TEXT("pieGetPlayerTransform"), [this](const TMap<FString, FString>&, const FString& B) { return HandlePIEGetPlayerTransform(B); });
-	HandlerMap.Add(TEXT("pieTeleportPlayer"), [this](const TMap<FString, FString>&, const FString& B) { return HandlePIETeleportPlayer(B); });
-	HandlerMap.Add(TEXT("pieQueryActors"), [this](const TMap<FString, FString>&, const FString& B) { return HandlePIEQueryActors(B); });
-	// Sublevel handlers
-	HandlerMap.Add(TEXT("getLevelInfo"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetLevelInfo(B); });
-	HandlerMap.Add(TEXT("listSublevels"), [this](const TMap<FString, FString>&, const FString& B) { return HandleListSublevels(B); });
-	HandlerMap.Add(TEXT("loadSublevel"), [this](const TMap<FString, FString>&, const FString& B) { return HandleLoadSublevel(B); });
-	HandlerMap.Add(TEXT("unloadSublevel"), [this](const TMap<FString, FString>&, const FString& B) { return HandleUnloadSublevel(B); });
-	// Editor utility handlers
-	HandlerMap.Add(TEXT("focusActor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleFocusActor(B); });
-	HandlerMap.Add(TEXT("editorNotification"), [this](const TMap<FString, FString>&, const FString& B) { return HandleEditorNotification(B); });
-	HandlerMap.Add(TEXT("saveAll"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSaveAll(B); });
-	HandlerMap.Add(TEXT("getDirtyPackages"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetDirtyPackages(B); });
-	// Selection handlers
-	HandlerMap.Add(TEXT("getEditorSelection"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetEditorSelection(B); });
-	HandlerMap.Add(TEXT("setEditorSelection"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetEditorSelection(B); });
-	HandlerMap.Add(TEXT("clearSelection"), [this](const TMap<FString, FString>&, const FString& B) { return HandleClearSelection(B); });
-	// CVar handlers
-	HandlerMap.Add(TEXT("getCVar"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetCVar(B); });
-	HandlerMap.Add(TEXT("setCVar"), [this](const TMap<FString, FString>&, const FString& B) { return HandleSetCVar(B); });
-	HandlerMap.Add(TEXT("listCVars"), [this](const TMap<FString, FString>&, const FString& B) { return HandleListCVars(B); });
-	// Output log handlers
-	HandlerMap.Add(TEXT("getOutputLog"), [this](const TMap<FString, FString>&, const FString& B) { return HandleGetOutputLog(B); });
-	HandlerMap.Add(TEXT("clearOutputLog"), [this](const TMap<FString, FString>&, const FString& B) { return HandleClearOutputLog(B); });
-	// Screenshot handlers
-	HandlerMap.Add(TEXT("takeScreenshot"), [this](const TMap<FString, FString>&, const FString& B) { return HandleTakeScreenshot(B); });
-	HandlerMap.Add(TEXT("takeHighResScreenshot"), [this](const TMap<FString, FString>&, const FString& B) { return HandleTakeHighResScreenshot(B); });
-	// PIE lifecycle handlers
-	HandlerMap.Add(TEXT("startPIE"), [this](const TMap<FString, FString>&, const FString& B) { return HandleStartPIE(B); });
-	HandlerMap.Add(TEXT("stopPIE"), [this](const TMap<FString, FString>&, const FString& B) { return HandleStopPIE(B); });
-	HandlerMap.Add(TEXT("isPIERunning"), [this](const TMap<FString, FString>&, const FString& B) { return HandleIsPIERunning(B); });
-	HandlerMap.Add(TEXT("piePause"), [this](const TMap<FString, FString>&, const FString& B) { return HandlePIEPause(B); });
-	// Content browser handlers
-	HandlerMap.Add(TEXT("navigateContentBrowser"), [this](const TMap<FString, FString>&, const FString& B) { return HandleNavigateContentBrowser(B); });
-	HandlerMap.Add(TEXT("openAssetEditor"), [this](const TMap<FString, FString>&, const FString& B) { return HandleOpenAssetEditor(B); });
-	// Undo/Redo handlers
-	HandlerMap.Add(TEXT("undo"), [this](const TMap<FString, FString>&, const FString& B) { return HandleUndo(B); });
-	HandlerMap.Add(TEXT("redo"), [this](const TMap<FString, FString>&, const FString& B) { return HandleRedo(B); });
-	HandlerMap.Add(TEXT("beginTransaction"), [this](const TMap<FString, FString>&, const FString& B) { return HandleBeginTransaction(B); });
-	HandlerMap.Add(TEXT("endTransaction"), [this](const TMap<FString, FString>&, const FString& B) { return HandleEndTransaction(B); });
-	// Widget Blueprint handlers
-	HandlerMap.Add(TEXT("listWidgetTree"),          [this](const TMap<FString, FString>&, const FString& B) { return HandleListWidgetTree(B); });
-	HandlerMap.Add(TEXT("getWidgetProperties"),     [this](const TMap<FString, FString>&, const FString& B) { return HandleGetWidgetProperties(B); });
-	HandlerMap.Add(TEXT("addWidget"),               [this](const TMap<FString, FString>&, const FString& B) { return HandleAddWidget(B); });
-	HandlerMap.Add(TEXT("removeWidget"),            [this](const TMap<FString, FString>&, const FString& B) { return HandleRemoveWidget(B); });
-	HandlerMap.Add(TEXT("setWidgetProperty"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleSetWidgetProperty(B); });
-	HandlerMap.Add(TEXT("moveWidget"),              [this](const TMap<FString, FString>&, const FString& B) { return HandleMoveWidget(B); });
-	HandlerMap.Add(TEXT("createWidgetBlueprint"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleCreateWidgetBlueprint(B); });
-
-	// Level actor handlers
-	HandlerMap.Add(TEXT("current-level"),       [this](const TMap<FString, FString>& P, const FString& B) { return HandleGetCurrentLevel(P, B); });
-	HandlerMap.Add(TEXT("list-actors"),         [this](const TMap<FString, FString>& P, const FString& B) { return HandleListActors(P, B); });
-	HandlerMap.Add(TEXT("actor-properties"),    [this](const TMap<FString, FString>& P, const FString& B) { return HandleGetActorProperties(P, B); });
-	HandlerMap.Add(TEXT("selected-actors"),     [this](const TMap<FString, FString>& P, const FString& B) { return HandleGetSelectedActors(P, B); });
-	HandlerMap.Add(TEXT("set-actor-transform"), [this](const TMap<FString, FString>& P, const FString& B) { return HandleSetActorTransform(P, B); });
-	HandlerMap.Add(TEXT("set-actor-property"),  [this](const TMap<FString, FString>& P, const FString& B) { return HandleSetActorProperty(P, B); });
-	HandlerMap.Add(TEXT("spawn-actor"),         [this](const TMap<FString, FString>& P, const FString& B) { return HandleSpawnActor(P, B); });
-	HandlerMap.Add(TEXT("delete-actor"),        [this](const TMap<FString, FString>& P, const FString& B) { return HandleDeleteActor(P, B); });
+	// PIE control
+	HandlerMap.Add(TEXT("startPie"),                [this](const TMap<FString, FString>&, const FString& B) { return HandleStartPIE(B); });
+	HandlerMap.Add(TEXT("stopPie"),                 [this](const TMap<FString, FString>&, const FString& B) { return HandleStopPIE(B); });
+	HandlerMap.Add(TEXT("isPieRunning"),            [this](const TMap<FString, FString>&, const FString& B) { return HandleIsPIERunning(B); });
 }
 
 // ============================================================

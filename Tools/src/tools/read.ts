@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { ensureUE, ueGet } from "../ue-bridge.js";
+import { ensureUE, ueGet, uePost } from "../ue-bridge.js";
 import { summarizeBlueprint } from "../graph-describe.js";
 import { describeGraph } from "../graph-describe.js";
 
@@ -265,6 +265,162 @@ export function registerReadTools(server: McpServer): void {
         lines.push(`\nNo usages found.`);
       }
 
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  server.tool(
+    "get_skeleton",
+    "Inspect a USkeleton asset: dumps the full bone hierarchy (with parent index, ref-pose transform), all sockets, and the curve metadata name list. Use the package path (e.g. '/Game/Characters/CC/Backend/CC4/CC5_Rig'). Useful for diffing rigs across characters.",
+    {
+      path: z.string().describe("Package path of the USkeleton asset, e.g. '/Game/Characters/CC/Backend/CC4/CC5_Rig'"),
+      tree: z.boolean().optional().default(true).describe("If true (default), format bones as an indented hierarchy tree. If false, return raw JSON."),
+      includeTransforms: z.boolean().optional().default(false).describe("Include ref-pose location in tree output (off by default to keep it compact)."),
+    },
+    async ({ path, tree, includeTransforms }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await ueGet("/api/skeleton", { path });
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      if (!tree) {
+        return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+      }
+
+      const bones: Array<{
+        index: number;
+        name: string;
+        parentIndex: number;
+        parentName: string;
+        locX?: number; locY?: number; locZ?: number;
+      }> = data.bones || [];
+
+      const children = new Map<number, number[]>();
+      for (const b of bones) {
+        const p = b.parentIndex;
+        if (!children.has(p)) children.set(p, []);
+        children.get(p)!.push(b.index);
+      }
+
+      const lines: string[] = [];
+      lines.push(`Skeleton: ${data.name} (${data.path})`);
+      lines.push(`Bones: ${data.boneCount}   Sockets: ${data.socketCount}   Curves: ${data.curveCount}`);
+      lines.push("");
+      lines.push("Bone hierarchy:");
+
+      const walk = (idx: number, depth: number) => {
+        const b = bones[idx];
+        if (!b) return;
+        const indent = "  ".repeat(depth);
+        let suffix = "";
+        if (includeTransforms && b.locX !== undefined) {
+          suffix = `  [loc ${b.locX!.toFixed(2)}, ${b.locY!.toFixed(2)}, ${b.locZ!.toFixed(2)}]`;
+        }
+        lines.push(`${indent}${b.name}${suffix}`);
+        const kids = children.get(idx) || [];
+        for (const k of kids) walk(k, depth + 1);
+      };
+      const roots = children.get(-1) || [];
+      for (const r of roots) walk(r, 0);
+
+      if (data.sockets && data.sockets.length) {
+        lines.push("");
+        lines.push(`Sockets (${data.sockets.length}):`);
+        for (const s of data.sockets) {
+          const loc = (s.locX !== undefined)
+            ? `  loc(${s.locX.toFixed(2)}, ${s.locY.toFixed(2)}, ${s.locZ.toFixed(2)})`
+            : "";
+          lines.push(`  ${s.name} @ ${s.bone}${loc}`);
+        }
+      }
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  server.tool(
+    "add_skeleton_socket",
+    "Add (or update) a single socket on a USkeleton asset. The skeleton .uasset is saved to disk; the read-only attribute is cleared automatically. Wrapped in an undo transaction. Use 'overwrite=false' to refuse if a socket with the same name already exists. Use 'dryRun=true' to preview without saving.",
+    {
+      path: z.string().describe("Package path of the USkeleton, e.g. '/Game/Characters/CC/Backend/CC4/CC5New_Rig'"),
+      socketName: z.string().describe("Socket name (FName) to create or update"),
+      bone: z.string().describe("Bone name the socket is parented to. Must exist on the skeleton."),
+      locX: z.number().optional().default(0),
+      locY: z.number().optional().default(0),
+      locZ: z.number().optional().default(0),
+      rotPitch: z.number().optional().default(0),
+      rotYaw: z.number().optional().default(0),
+      rotRoll: z.number().optional().default(0),
+      scaleX: z.number().optional().default(1),
+      scaleY: z.number().optional().default(1),
+      scaleZ: z.number().optional().default(1),
+      overwrite: z.boolean().optional().default(true).describe("If true (default), update an existing socket with the same name; if false, error out instead."),
+      dryRun: z.boolean().optional().default(false).describe("Validate without modifying the asset."),
+    },
+    async (args) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await uePost("/api/add-skeleton-socket", args);
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const verb = data.created ? "Created" : (data.updated ? "Updated" : "No-op");
+      const tag = data.dryRun ? " (dry run)" : (data.saved ? "" : " [NOT SAVED]");
+      return { content: [{ type: "text" as const, text: `${verb} socket '${data.socketName}' @ '${data.bone}' on ${data.skeleton}${tag}` }] };
+    }
+  );
+
+  server.tool(
+    "remove_skeleton_socket",
+    "Remove a socket by name from a USkeleton asset. The skeleton is saved to disk. Wrapped in an undo transaction.",
+    {
+      path: z.string().describe("Package path of the USkeleton"),
+      socketName: z.string().describe("Socket name to remove"),
+      dryRun: z.boolean().optional().default(false),
+    },
+    async (args) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await uePost("/api/remove-skeleton-socket", args);
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const tag = data.dryRun ? " (dry run)" : (data.saved ? "" : " [NOT SAVED]");
+      return { content: [{ type: "text" as const, text: `Removed socket '${data.socketName}' from ${data.skeleton}${tag}` }] };
+    }
+  );
+
+  server.tool(
+    "copy_skeleton_sockets",
+    "Copy all sockets from one USkeleton to another, preserving name, bone, and relative transform. Sockets whose target bone doesn't exist on the destination skeleton are skipped and reported under 'missingBones'. Use 'only' to restrict to a subset of socket names. Use 'overwrite=false' to skip sockets that already exist on the destination.",
+    {
+      fromPath: z.string().describe("Source USkeleton package path"),
+      toPath: z.string().describe("Destination USkeleton package path"),
+      only: z.array(z.string()).optional().describe("If provided, only copy sockets whose name is in this list (case-insensitive)."),
+      overwrite: z.boolean().optional().default(true),
+      dryRun: z.boolean().optional().default(false),
+    },
+    async (args) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await uePost("/api/copy-skeleton-sockets", args);
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      const lines: string[] = [];
+      const tag = data.dryRun ? " (dry run)" : (data.saved ? "" : (data.created?.length || data.updated?.length ? " [NOT SAVED]" : ""));
+      lines.push(`copy_skeleton_sockets: ${data.from} → ${data.to}${tag}`);
+      if (data.created?.length) lines.push(`  Created (${data.created.length}): ${data.created.join(", ")}`);
+      if (data.updated?.length) lines.push(`  Updated (${data.updated.length}): ${data.updated.join(", ")}`);
+      if (data.skipped?.length) lines.push(`  Skipped existing (${data.skipped.length}): ${data.skipped.join(", ")}`);
+      if (data.missingBones?.length) {
+        lines.push(`  Missing target bones (${data.missingBones.length}):`);
+        for (const m of data.missingBones) lines.push(`    ${m.socket} expected bone '${m.bone}'`);
+      }
+      if (!data.created?.length && !data.updated?.length && !data.skipped?.length && !data.missingBones?.length) {
+        lines.push(`  (no sockets to copy)`);
+      }
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );

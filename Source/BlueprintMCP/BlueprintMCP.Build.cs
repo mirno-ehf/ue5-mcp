@@ -34,7 +34,8 @@ public class BlueprintMCP : ModuleRules
 			"Slate",
 			"UMG",
 			"UMGEditor",
-			"SlateCore"
+			"SlateCore",
+			"HairStrandsCore"
 		});
 	}
 }

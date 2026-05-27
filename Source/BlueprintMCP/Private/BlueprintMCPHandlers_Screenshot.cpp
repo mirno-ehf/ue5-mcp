@@ -1,5 +1,7 @@
 #include "BlueprintMCPServer.h"
 #include "Editor.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
 #include "LevelEditorViewport.h"
 #include "UnrealClient.h"
 #include "HighResScreenshot.h"
@@ -51,19 +53,22 @@ FString FBlueprintMCPServer::HandleTakeScreenshot(const FString& Body)
 	FString OutputDir = FPaths::ProjectSavedDir() / TEXT("Screenshots");
 	FString FullPath = OutputDir / Filename;
 
-	// Get the active viewport
-	FLevelEditorViewportClient* ViewportClient = nullptr;
-	if (GEditor->GetLevelViewportClients().Num() > 0)
+	// Prefer the PIE game viewport when playing — that's where gameplay (and the
+	// framing component) actually renders. Falls back to the editor level viewport.
+	FViewport* Viewport = nullptr;
+	if (GEditor->PlayWorld && GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport)
 	{
-		ViewportClient = GEditor->GetLevelViewportClients()[0];
+		Viewport = GEngine->GameViewport->Viewport;
+	}
+	else if (GEditor->GetLevelViewportClients().Num() > 0 && GEditor->GetLevelViewportClients()[0])
+	{
+		Viewport = GEditor->GetLevelViewportClients()[0]->Viewport;
 	}
 
-	if (!ViewportClient || !ViewportClient->Viewport)
+	if (!Viewport)
 	{
 		return MakeErrorJson(TEXT("No active viewport found."));
 	}
-
-	FViewport* Viewport = ViewportClient->Viewport;
 
 	// Read pixels from viewport
 	TArray<FColor> Bitmap;

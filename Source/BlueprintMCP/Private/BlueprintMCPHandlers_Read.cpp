@@ -642,3 +642,528 @@ FString FBlueprintMCPServer::HandleSearchByType(const TMap<FString, FString>& Pa
 	Result->SetArrayField(TEXT("results"), Results);
 	return JsonToString(Result);
 }
+
+// ============================================================
+// Skeleton inspection
+// ============================================================
+
+#include "Animation/Skeleton.h"
+#include "Engine/SkeletalMeshSocket.h"
+
+FString FBlueprintMCPServer::HandleGetSkeleton(const TMap<FString, FString>& Params)
+{
+	const FString* PathParam = Params.Find(TEXT("path"));
+	const FString* NameParam = Params.Find(TEXT("name"));
+	if ((!PathParam || PathParam->IsEmpty()) && (!NameParam || NameParam->IsEmpty()))
+	{
+		return MakeErrorJson(TEXT("Missing 'path' (preferred) or 'name' parameter. Example: path=/Game/Characters/CC/Backend/CC4/CC5_Rig"));
+	}
+
+	USkeleton* Skeleton = nullptr;
+	FString ResolvedPath;
+
+	if (PathParam && !PathParam->IsEmpty())
+	{
+		ResolvedPath = *PathParam;
+		// Accept both "/Game/Foo/Bar" and "/Game/Foo/Bar.Bar"
+		FString ObjectPath = ResolvedPath;
+		if (!ObjectPath.Contains(TEXT(".")))
+		{
+			FString LeafName;
+			ObjectPath.Split(TEXT("/"), nullptr, &LeafName, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+			ObjectPath = ResolvedPath + TEXT(".") + LeafName;
+		}
+		Skeleton = LoadObject<USkeleton>(nullptr, *ObjectPath);
+	}
+	else if (NameParam && !NameParam->IsEmpty())
+	{
+		ResolvedPath = *NameParam;
+		// Asset registry lookup by short name
+		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+		TArray<FAssetData> Found;
+		AssetRegistryModule.Get().GetAssetsByClass(USkeleton::StaticClass()->GetClassPathName(), Found);
+		for (const FAssetData& A : Found)
+		{
+			if (A.AssetName.ToString().Equals(*NameParam, ESearchCase::IgnoreCase))
+			{
+				Skeleton = Cast<USkeleton>(A.GetAsset());
+				if (Skeleton) { ResolvedPath = A.GetObjectPathString(); break; }
+			}
+		}
+	}
+
+	if (!Skeleton)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("Skeleton not found: %s"), *ResolvedPath));
+	}
+
+	const FReferenceSkeleton& RefSk = Skeleton->GetReferenceSkeleton();
+	const TArray<FMeshBoneInfo>& BoneInfos = RefSk.GetRefBoneInfo();
+	const TArray<FTransform>& BonePose = RefSk.GetRefBonePose();
+	const int32 NumBones = BoneInfos.Num();
+
+	TArray<TSharedPtr<FJsonValue>> Bones;
+	Bones.Reserve(NumBones);
+	for (int32 i = 0; i < NumBones; ++i)
+	{
+		const FMeshBoneInfo& Info = BoneInfos[i];
+		TSharedRef<FJsonObject> B = MakeShared<FJsonObject>();
+		B->SetNumberField(TEXT("index"), i);
+		B->SetStringField(TEXT("name"), Info.Name.ToString());
+		B->SetNumberField(TEXT("parentIndex"), Info.ParentIndex);
+		B->SetStringField(TEXT("parentName"), Info.ParentIndex >= 0 ? BoneInfos[Info.ParentIndex].Name.ToString() : FString());
+
+		if (BonePose.IsValidIndex(i))
+		{
+			const FTransform& T = BonePose[i];
+			const FVector L = T.GetLocation();
+			const FQuat Q = T.GetRotation();
+			const FVector S = T.GetScale3D();
+			B->SetNumberField(TEXT("locX"), L.X);
+			B->SetNumberField(TEXT("locY"), L.Y);
+			B->SetNumberField(TEXT("locZ"), L.Z);
+			B->SetNumberField(TEXT("rotX"), Q.X);
+			B->SetNumberField(TEXT("rotY"), Q.Y);
+			B->SetNumberField(TEXT("rotZ"), Q.Z);
+			B->SetNumberField(TEXT("rotW"), Q.W);
+			B->SetNumberField(TEXT("scaleX"), S.X);
+			B->SetNumberField(TEXT("scaleY"), S.Y);
+			B->SetNumberField(TEXT("scaleZ"), S.Z);
+		}
+		Bones.Add(MakeShared<FJsonValueObject>(B));
+	}
+
+	// Sockets (with transforms)
+	TArray<TSharedPtr<FJsonValue>> Sockets;
+	for (USkeletalMeshSocket* Socket : Skeleton->Sockets)
+	{
+		if (!Socket) continue;
+		TSharedRef<FJsonObject> S = MakeShared<FJsonObject>();
+		S->SetStringField(TEXT("name"), Socket->SocketName.ToString());
+		S->SetStringField(TEXT("bone"), Socket->BoneName.ToString());
+		const FVector L = Socket->RelativeLocation;
+		const FRotator R = Socket->RelativeRotation;
+		const FVector Sc = Socket->RelativeScale;
+		S->SetNumberField(TEXT("locX"), L.X);
+		S->SetNumberField(TEXT("locY"), L.Y);
+		S->SetNumberField(TEXT("locZ"), L.Z);
+		S->SetNumberField(TEXT("rotPitch"), R.Pitch);
+		S->SetNumberField(TEXT("rotYaw"), R.Yaw);
+		S->SetNumberField(TEXT("rotRoll"), R.Roll);
+		S->SetNumberField(TEXT("scaleX"), Sc.X);
+		S->SetNumberField(TEXT("scaleY"), Sc.Y);
+		S->SetNumberField(TEXT("scaleZ"), Sc.Z);
+		Sockets.Add(MakeShared<FJsonValueObject>(S));
+	}
+
+	// Curve names (animation curves stored on skeleton)
+	TArray<TSharedPtr<FJsonValue>> CurveNames;
+	{
+		TArray<FName> Names;
+		Skeleton->GetCurveMetaDataNames(Names);
+		Names.Sort(FNameLexicalLess());
+		for (const FName& N : Names)
+		{
+			CurveNames.Add(MakeShared<FJsonValueString>(N.ToString()));
+		}
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("name"), Skeleton->GetName());
+	Result->SetStringField(TEXT("path"), ResolvedPath);
+	Result->SetNumberField(TEXT("boneCount"), NumBones);
+	Result->SetArrayField(TEXT("bones"), Bones);
+	Result->SetNumberField(TEXT("socketCount"), Sockets.Num());
+	Result->SetArrayField(TEXT("sockets"), Sockets);
+	Result->SetNumberField(TEXT("curveCount"), CurveNames.Num());
+	Result->SetArrayField(TEXT("curves"), CurveNames);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// Skeleton mutation: add / remove / copy sockets
+// ============================================================
+
+namespace
+{
+	// Resolve a USkeleton by 'path' (preferred) or 'name'. Returns nullptr on failure.
+	USkeleton* ResolveSkeletonFromJson(const TSharedPtr<FJsonObject>& Json, FString& OutResolvedPath, FString& OutError)
+	{
+		FString PathField, NameField;
+		Json->TryGetStringField(TEXT("path"), PathField);
+		Json->TryGetStringField(TEXT("name"), NameField);
+		if (PathField.IsEmpty() && NameField.IsEmpty())
+		{
+			OutError = TEXT("Missing 'path' or 'name'.");
+			return nullptr;
+		}
+
+		USkeleton* Skeleton = nullptr;
+		if (!PathField.IsEmpty())
+		{
+			OutResolvedPath = PathField;
+			FString ObjectPath = PathField;
+			if (!ObjectPath.Contains(TEXT(".")))
+			{
+				FString LeafName;
+				ObjectPath.Split(TEXT("/"), nullptr, &LeafName, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+				ObjectPath = PathField + TEXT(".") + LeafName;
+			}
+			Skeleton = LoadObject<USkeleton>(nullptr, *ObjectPath);
+		}
+		if (!Skeleton && !NameField.IsEmpty())
+		{
+			OutResolvedPath = NameField;
+			FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+			TArray<FAssetData> Found;
+			AssetRegistryModule.Get().GetAssetsByClass(USkeleton::StaticClass()->GetClassPathName(), Found);
+			for (const FAssetData& A : Found)
+			{
+				if (A.AssetName.ToString().Equals(NameField, ESearchCase::IgnoreCase))
+				{
+					Skeleton = Cast<USkeleton>(A.GetAsset());
+					if (Skeleton) { OutResolvedPath = A.GetObjectPathString(); break; }
+				}
+			}
+		}
+
+		if (!Skeleton)
+		{
+			OutError = FString::Printf(TEXT("Skeleton not found: %s"), *OutResolvedPath);
+		}
+		return Skeleton;
+	}
+
+	// Find a socket by name on a skeleton (returns index or INDEX_NONE).
+	int32 FindSocketIndex(USkeleton* Skeleton, FName SocketName)
+	{
+		for (int32 i = 0; i < Skeleton->Sockets.Num(); ++i)
+		{
+			if (Skeleton->Sockets[i] && Skeleton->Sockets[i]->SocketName == SocketName)
+			{
+				return i;
+			}
+		}
+		return INDEX_NONE;
+	}
+}
+
+FString FBlueprintMCPServer::HandleAddSkeletonSocket(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body."));
+	}
+
+	FString ResolvedPath, ResolveError;
+	USkeleton* Skeleton = ResolveSkeletonFromJson(Json, ResolvedPath, ResolveError);
+	if (!Skeleton)
+	{
+		return MakeErrorJson(ResolveError);
+	}
+
+	FString SocketName, BoneName;
+	if (!Json->TryGetStringField(TEXT("socketName"), SocketName) || SocketName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing 'socketName'."));
+	}
+	if (!Json->TryGetStringField(TEXT("bone"), BoneName) || BoneName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing 'bone'."));
+	}
+
+	// Validate bone exists on this skeleton
+	const FReferenceSkeleton& RefSk = Skeleton->GetReferenceSkeleton();
+	if (RefSk.FindBoneIndex(FName(*BoneName)) == INDEX_NONE)
+	{
+		return MakeErrorJson(FString::Printf(TEXT("Bone '%s' not found on skeleton '%s'."), *BoneName, *Skeleton->GetName()));
+	}
+
+	// Optional transform — defaults to identity
+	auto GetNum = [&Json](const TCHAR* Field, double Default)
+	{
+		double V = Default;
+		Json->TryGetNumberField(Field, V);
+		return V;
+	};
+	FVector Loc(GetNum(TEXT("locX"), 0.0), GetNum(TEXT("locY"), 0.0), GetNum(TEXT("locZ"), 0.0));
+	FRotator Rot(GetNum(TEXT("rotPitch"), 0.0), GetNum(TEXT("rotYaw"), 0.0), GetNum(TEXT("rotRoll"), 0.0));
+	FVector Scale(GetNum(TEXT("scaleX"), 1.0), GetNum(TEXT("scaleY"), 1.0), GetNum(TEXT("scaleZ"), 1.0));
+
+	bool bOverwrite = true;
+	Json->TryGetBoolField(TEXT("overwrite"), bOverwrite);
+	bool bDryRun = false;
+	Json->TryGetBoolField(TEXT("dryRun"), bDryRun);
+
+	const int32 ExistingIdx = FindSocketIndex(Skeleton, FName(*SocketName));
+	bool bUpdated = false;
+	bool bCreated = false;
+
+	if (ExistingIdx != INDEX_NONE)
+	{
+		if (!bOverwrite)
+		{
+			return MakeErrorJson(FString::Printf(TEXT("Socket '%s' already exists on skeleton '%s' (set overwrite=true to update)."), *SocketName, *Skeleton->GetName()));
+		}
+		bUpdated = true;
+	}
+	else
+	{
+		bCreated = true;
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("skeleton"), Skeleton->GetName());
+	Result->SetStringField(TEXT("path"), ResolvedPath);
+	Result->SetStringField(TEXT("socketName"), SocketName);
+	Result->SetStringField(TEXT("bone"), BoneName);
+	Result->SetBoolField(TEXT("created"), bCreated);
+	Result->SetBoolField(TEXT("updated"), bUpdated);
+	Result->SetBoolField(TEXT("dryRun"), bDryRun);
+
+	if (bDryRun)
+	{
+		Result->SetBoolField(TEXT("success"), true);
+		return JsonToString(Result);
+	}
+
+	Skeleton->Modify();
+	USkeletalMeshSocket* Socket = nullptr;
+	if (ExistingIdx != INDEX_NONE)
+	{
+		Socket = Skeleton->Sockets[ExistingIdx];
+	}
+	else
+	{
+		Socket = NewObject<USkeletalMeshSocket>(Skeleton);
+		Socket->SetFlags(RF_Transactional);
+		Skeleton->Sockets.Add(Socket);
+	}
+	Socket->Modify();
+	Socket->SocketName = FName(*SocketName);
+	Socket->BoneName = FName(*BoneName);
+	Socket->RelativeLocation = Loc;
+	Socket->RelativeRotation = Rot;
+	Socket->RelativeScale = Scale;
+
+	Skeleton->MarkPackageDirty();
+	const bool bSaved = SaveGenericPackage(Skeleton);
+
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	Result->SetBoolField(TEXT("success"), bSaved);
+	if (!bSaved)
+	{
+		Result->SetStringField(TEXT("error"), TEXT("Failed to save USkeleton package. See log."));
+	}
+	return JsonToString(Result);
+}
+
+FString FBlueprintMCPServer::HandleRemoveSkeletonSocket(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body."));
+	}
+
+	FString ResolvedPath, ResolveError;
+	USkeleton* Skeleton = ResolveSkeletonFromJson(Json, ResolvedPath, ResolveError);
+	if (!Skeleton)
+	{
+		return MakeErrorJson(ResolveError);
+	}
+
+	FString SocketName;
+	if (!Json->TryGetStringField(TEXT("socketName"), SocketName) || SocketName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing 'socketName'."));
+	}
+
+	bool bDryRun = false;
+	Json->TryGetBoolField(TEXT("dryRun"), bDryRun);
+
+	const int32 Idx = FindSocketIndex(Skeleton, FName(*SocketName));
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("skeleton"), Skeleton->GetName());
+	Result->SetStringField(TEXT("path"), ResolvedPath);
+	Result->SetStringField(TEXT("socketName"), SocketName);
+	Result->SetBoolField(TEXT("dryRun"), bDryRun);
+
+	if (Idx == INDEX_NONE)
+	{
+		Result->SetBoolField(TEXT("removed"), false);
+		Result->SetBoolField(TEXT("success"), false);
+		Result->SetStringField(TEXT("error"), FString::Printf(TEXT("Socket '%s' not found."), *SocketName));
+		return JsonToString(Result);
+	}
+
+	if (bDryRun)
+	{
+		Result->SetBoolField(TEXT("removed"), true);
+		Result->SetBoolField(TEXT("success"), true);
+		Result->SetBoolField(TEXT("saved"), false);
+		return JsonToString(Result);
+	}
+
+	Skeleton->Modify();
+	Skeleton->Sockets.RemoveAt(Idx);
+	Skeleton->MarkPackageDirty();
+	const bool bSaved = SaveGenericPackage(Skeleton);
+
+	Result->SetBoolField(TEXT("removed"), true);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	Result->SetBoolField(TEXT("success"), bSaved);
+	if (!bSaved)
+	{
+		Result->SetStringField(TEXT("error"), TEXT("Removed in memory but failed to save USkeleton package. See log."));
+	}
+	return JsonToString(Result);
+}
+
+FString FBlueprintMCPServer::HandleCopySkeletonSockets(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid())
+	{
+		return MakeErrorJson(TEXT("Invalid JSON body."));
+	}
+
+	// Resolve source — accept fromPath/fromName
+	FString FromPath, FromName, FromResolved;
+	Json->TryGetStringField(TEXT("fromPath"), FromPath);
+	Json->TryGetStringField(TEXT("fromName"), FromName);
+	if (FromPath.IsEmpty() && FromName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing 'fromPath' or 'fromName'."));
+	}
+	TSharedRef<FJsonObject> FromJson = MakeShared<FJsonObject>();
+	if (!FromPath.IsEmpty()) FromJson->SetStringField(TEXT("path"), FromPath);
+	if (!FromName.IsEmpty()) FromJson->SetStringField(TEXT("name"), FromName);
+	FString FromErr;
+	USkeleton* Source = ResolveSkeletonFromJson(FromJson, FromResolved, FromErr);
+	if (!Source) return MakeErrorJson(FString::Printf(TEXT("Source: %s"), *FromErr));
+
+	// Resolve destination — accept toPath/toName
+	FString ToPath, ToName, ToResolved;
+	Json->TryGetStringField(TEXT("toPath"), ToPath);
+	Json->TryGetStringField(TEXT("toName"), ToName);
+	if (ToPath.IsEmpty() && ToName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing 'toPath' or 'toName'."));
+	}
+	TSharedRef<FJsonObject> ToJson = MakeShared<FJsonObject>();
+	if (!ToPath.IsEmpty()) ToJson->SetStringField(TEXT("path"), ToPath);
+	if (!ToName.IsEmpty()) ToJson->SetStringField(TEXT("name"), ToName);
+	FString ToErr;
+	USkeleton* Dest = ResolveSkeletonFromJson(ToJson, ToResolved, ToErr);
+	if (!Dest) return MakeErrorJson(FString::Printf(TEXT("Destination: %s"), *ToErr));
+
+	if (Source == Dest)
+	{
+		return MakeErrorJson(TEXT("Source and destination are the same skeleton."));
+	}
+
+	bool bOverwrite = true;
+	Json->TryGetBoolField(TEXT("overwrite"), bOverwrite);
+	bool bDryRun = false;
+	Json->TryGetBoolField(TEXT("dryRun"), bDryRun);
+
+	// Optional filter: copy only listed socket names (case-insensitive). If empty, copy all.
+	TSet<FString> Filter;
+	const TArray<TSharedPtr<FJsonValue>>* OnlyArr = nullptr;
+	if (Json->TryGetArrayField(TEXT("only"), OnlyArr))
+	{
+		for (const TSharedPtr<FJsonValue>& V : *OnlyArr)
+		{
+			Filter.Add(V->AsString().ToLower());
+		}
+	}
+
+	const FReferenceSkeleton& DestRef = Dest->GetReferenceSkeleton();
+
+	TArray<TSharedPtr<FJsonValue>> Created;
+	TArray<TSharedPtr<FJsonValue>> Updated;
+	TArray<TSharedPtr<FJsonValue>> Skipped;
+	TArray<TSharedPtr<FJsonValue>> MissingBones;
+
+	if (!bDryRun)
+	{
+		Dest->Modify();
+	}
+
+	for (USkeletalMeshSocket* Src : Source->Sockets)
+	{
+		if (!Src) continue;
+		const FString SrcName = Src->SocketName.ToString();
+		if (Filter.Num() > 0 && !Filter.Contains(SrcName.ToLower()))
+		{
+			continue;
+		}
+
+		if (DestRef.FindBoneIndex(Src->BoneName) == INDEX_NONE)
+		{
+			TSharedRef<FJsonObject> E = MakeShared<FJsonObject>();
+			E->SetStringField(TEXT("socket"), SrcName);
+			E->SetStringField(TEXT("bone"), Src->BoneName.ToString());
+			MissingBones.Add(MakeShared<FJsonValueObject>(E));
+			continue;
+		}
+
+		const int32 ExistingIdx = FindSocketIndex(Dest, Src->SocketName);
+		if (ExistingIdx != INDEX_NONE && !bOverwrite)
+		{
+			Skipped.Add(MakeShared<FJsonValueString>(SrcName));
+			continue;
+		}
+
+		USkeletalMeshSocket* Dst = nullptr;
+		if (ExistingIdx != INDEX_NONE)
+		{
+			Dst = Dest->Sockets[ExistingIdx];
+			Updated.Add(MakeShared<FJsonValueString>(SrcName));
+		}
+		else
+		{
+			Created.Add(MakeShared<FJsonValueString>(SrcName));
+		}
+
+		if (!bDryRun)
+		{
+			if (!Dst)
+			{
+				Dst = NewObject<USkeletalMeshSocket>(Dest);
+				Dst->SetFlags(RF_Transactional);
+				Dest->Sockets.Add(Dst);
+			}
+			Dst->Modify();
+			Dst->SocketName = Src->SocketName;
+			Dst->BoneName = Src->BoneName;
+			Dst->RelativeLocation = Src->RelativeLocation;
+			Dst->RelativeRotation = Src->RelativeRotation;
+			Dst->RelativeScale = Src->RelativeScale;
+		}
+	}
+
+	bool bSaved = false;
+	if (!bDryRun && (Created.Num() > 0 || Updated.Num() > 0))
+	{
+		Dest->MarkPackageDirty();
+		bSaved = SaveGenericPackage(Dest);
+	}
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("from"), Source->GetName());
+	Result->SetStringField(TEXT("to"), Dest->GetName());
+	Result->SetStringField(TEXT("fromPath"), FromResolved);
+	Result->SetStringField(TEXT("toPath"), ToResolved);
+	Result->SetBoolField(TEXT("dryRun"), bDryRun);
+	Result->SetBoolField(TEXT("overwrite"), bOverwrite);
+	Result->SetArrayField(TEXT("created"), Created);
+	Result->SetArrayField(TEXT("updated"), Updated);
+	Result->SetArrayField(TEXT("skipped"), Skipped);
+	Result->SetArrayField(TEXT("missingBones"), MissingBones);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	Result->SetBoolField(TEXT("success"), bDryRun ? true : (bSaved || (Created.Num() == 0 && Updated.Num() == 0)));
+	return JsonToString(Result);
+}
